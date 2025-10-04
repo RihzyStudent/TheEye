@@ -1,0 +1,19 @@
+# Minimal exoplanet + AI toolkit (Python 3.11)
+
+# Core numerics/plots
+numpy==1.26.4
+scipy==1.11.4
+pandas==2.2.2
+matplotlib==3.8.4
+
+# Simple ML
+scikit-learn==1.4.2
+
+# Astronomy / light-curve tools
+astropy==6.0.1
+astroquery==0.4.9.post1
+lightkurve==2.4.0
+batman-package==2.5.3
+
+# (Optional) progress bar
+tqdm==4.66.4

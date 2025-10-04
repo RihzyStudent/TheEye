@@ -1,4 +1,4 @@
-#!/home/rizhy/hackathonNasha/.venv/bin/python3.11
+#!/home/rizhy/TheEye/.venv/bin/python3.11
 # -*- coding: utf-8 -*-
 import re
 import sys
