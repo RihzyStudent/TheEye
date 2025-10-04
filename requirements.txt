@@ -1,36 +1,19 @@
-# Core scientific stack
-numpy>=1.23,<1.27
-scipy>=1.10,<1.13
-pandas>=1.5,<2.2
-matplotlib>=3.7,<3.9
-seaborn>=0.12
+# Minimal exoplanet + AI toolkit (Python 3.11)
 
-# Astronomy / astrophysics tools
-astropy>=5.1,<6.1
-astroquery>=0.4.6
-lightkurve>=2.4
-eleanor>=2.0
+# Core numerics/plots
+numpy==1.26.4
+scipy==1.11.4
+pandas==2.2.2
+matplotlib==3.8.4
 
-# Transit & variability modeling
-batman-package>=2.5
-# Skip wotan for Python 3.11 compatibility issues, unless needed
-wotan
+# Simple ML
+scikit-learn==1.4.2
 
-# Optional: Gaussian process time-series modeling
-celerite2>=0.2.0
+# Astronomy / light-curve tools
+astropy==6.0.1
+astroquery==0.4.9.post1
+lightkurve==2.4.0
+batman-package==2.5.3
 
-# ML/AI libraries
-scikit-learn>=1.3,<1.5
-xgboost>=1.7,<2.1
-lightgbm>=3.3,<4.3
-shap>=0.42
-
-# Web/API frameworks for demos
-fastapi>=0.95
-uvicorn>=0.22
-gradio>=3.41
-
-# Utilities
-tqdm
-jupyter
-notebook
+# (Optional) progress bar
+tqdm==4.66.4
