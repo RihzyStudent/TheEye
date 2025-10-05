@@ -1,0 +1,69 @@
+from sklearn.impute import SimpleImputer
+from imblearn.over_sampling import SMOTE
+from sklearn.pipeline import Pipeline
+from sklearn.ensemble import RandomForestClassifier
+from sklearn.model_selection import train_test_split
+from sklearn.metrics import classification_report, confusion_matrix
+import pandas as pd
+import numpy as np
+
+# -----------------------------
+# 1. Load dataset
+# -----------------------------
+data = pd.read_csv("filtered_file.csv")
+
+X = data[['Orbital Period', 'Transit Midpoint', 'Transit Duration', 'Transit Depth',
+          'Planet Radius', 'Eqbm Temp', 'Insolation', 'Stellar Temp', 
+          'Stellar Grav', 'Ra', 'Dec']]
+y = data['Result']
+
+# Replace -1 with NaN
+X = X.replace(-1, np.nan)
+
+# -----------------------------
+# 2. Train-test split
+# -----------------------------
+X_train, X_test, y_train, y_test = train_test_split(
+    X, y, test_size=0.1, stratify=y, random_state=42
+)
+
+# -----------------------------
+# 3. Impute first, then SMOTE
+# -----------------------------
+# Temporary imputer to clean training set for SMOTE
+temp_imputer = SimpleImputer(strategy="mean")
+X_train_imputed = temp_imputer.fit_transform(X_train)
+
+smote = SMOTE(random_state=42)
+X_train_res, y_train_res = smote.fit_resample(X_train_imputed, y_train)
+
+# -----------------------------
+# 4. Pipeline (Imputer + RF)
+# -----------------------------
+rf_pipeline = Pipeline([
+    ("imputer", SimpleImputer(strategy="mean")),  # used at prediction time
+    ("rf", RandomForestClassifier(
+        n_estimators=200,
+        max_depth=None,
+        min_samples_split=2,
+        min_samples_leaf=1,
+        n_jobs=-1,
+        random_state=42
+    ))
+])
+
+rf_pipeline.fit(X_train_res, y_train_res)
+
+# -----------------------------
+# 5. Evaluate on test set
+# -----------------------------
+X_test_imputed = temp_imputer.transform(X_test)
+proba_pos = rf_pipeline.predict_proba(X_test)[:, 1]  # pipeline imputes automatically
+
+y_true = y_test.values
+y_pred = (proba_pos >= 0.5).astype(int)
+
+print("Confusion matrix:")
+print(confusion_matrix(y_true, y_pred))
+print("\nClassification report:")
+print(classification_report(y_true, y_pred, target_names=["not-planet", "planet"]))

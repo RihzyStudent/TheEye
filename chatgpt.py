@@ -31,13 +31,13 @@ X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, stratif
 # -----------------------------
 # 3. Handle imbalance (optional, try with/without SMOTE)
 # -----------------------------
-smote = SMOTE(random_state=42)
+smote = SMOTE( random_state= 42)
 X_train_res, y_train_res = smote.fit_resample(X_train, y_train)
 
 # -----------------------------
 # 4. Define Random Forest with class weighting
 # -----------------------------
-rf = RandomForestClassifier(class_weight="balanced", random_state=42, n_jobs=-1, min_samples_split=2, min_samples_leaf=1)
+rf = RandomForestClassifier( random_state=42, n_jobs=-1, min_samples_split=2, min_samples_leaf=1)
 
 # -----------------------------
 # 5. Hyperparameter tuning with GridSearchCV
@@ -102,14 +102,14 @@ y_true_pos = (y_test == pos_label).astype(int)    # binary: 1 if planet, else 0
 precision, recall, thresholds = precision_recall_curve(y_true_pos, proba_pos)
 ap = average_precision_score(y_true_pos, proba_pos)
 
-plt.figure(figsize=(7,6))
-plt.plot(recall, precision, label=f'PR curve (AP={ap:.3f})')
-plt.xlabel('Recall (planet detection rate)')
-plt.ylabel('Precision (when we predict planet, how often correct)')
-plt.title('Precision-Recall curve (planet as positive)')
-plt.grid(True)
-plt.legend()
-plt.show()
+# plt.figure(figsize=(7,6))
+# plt.plot(recall, precision, label=f'PR curve (AP={ap:.3f})')
+# plt.xlabel('Recall (planet detection rate)')
+# plt.ylabel('Precision (when we predict planet, how often correct)')
+# plt.title('Precision-Recall curve (planet as positive)')
+# plt.grid(True)
+# plt.legend()
+# plt.show()
 
 # ---------------------------
 # 2) Find threshold that minimizes FNs subject to precision constraint
@@ -164,6 +164,6 @@ print("\nClassification report (planet as positive):")
 print(classification_report(y_true_pos, y_pred_best, target_names=['not-planet','planet']))
 
 # Also show default 0.5 baseline for comparison
-y_pred_default = (proba_pos >= 0.3).astype(int)
+y_pred_default = (proba_pos >= 0.2).astype(int)
 print("\nBaseline (threshold=0.2) classification report:")
 print(classification_report(y_true_pos, y_pred_default, target_names=['not-planet','planet']))
