@@ -1,0 +1,136 @@
+@import url('https://fonts.googleapis.com/css2?family=Montserrat:wght@400;500;600;700&family=Inter:wght@400;500;600&display=swap');
+
+@import "tailwindcss";
+
+@theme {
+  --color-cosmic-deep-blue: #0B1426;
+  --color-cosmic-purple: #2D1B69;
+  --color-stellar-gold: #FFD700;
+  --color-pure-white: #FFFFFF;
+}
+
+@layer base {
+  :root {
+    --background: 0 0% 100%;
+    --foreground: 0 0% 14.5%;
+    --card: 0 0% 100%;
+    --card-foreground: 0 0% 14.5%;
+    --popover: 0 0% 100%;
+    --popover-foreground: 0 0% 14.5%;
+    --primary: 0 0% 1%;
+    --primary-foreground: 0 0% 100%;
+    --secondary: 264 6% 95%;
+    --secondary-foreground: 0 0% 1%;
+    --muted: 0 0% 92.5%;
+    --muted-foreground: 0 0% 44.5%;
+    --accent: 0 0% 91.5%;
+    --accent-foreground: 0 0% 1%;
+    --destructive: 351 83% 47%;
+    --destructive-foreground: 0 0% 100%;
+    --border: 0 0% 0% / 0.1;
+    --input: 0 0% 0% / 0;
+    --ring: 0 0% 70.8%;
+    --radius: 0.625rem;
+    
+    /* Cosmic Color Palette */
+    --cosmic-deep-blue: #0B1426;
+    --cosmic-purple: #2D1B69;
+    --stellar-gold: #FFD700;
+    --pure-white: #FFFFFF;
+  }
+
+  .dark {
+    --background: 222 50% 8%;
+    --foreground: 0 0% 100%;
+    --card: 222 50% 8%;
+    --card-foreground: 0 0% 100%;
+    --popover: 222 50% 8%;
+    --popover-foreground: 0 0% 100%;
+    --primary: 51 100% 50%;
+    --primary-foreground: 222 50% 8%;
+    --secondary: 264 38% 16%;
+    --secondary-foreground: 0 0% 100%;
+    --muted: 264 38% 16% / 0.3;
+    --muted-foreground: 0 0% 100% / 0.7;
+    --accent: 264 38% 16%;
+    --accent-foreground: 0 0% 100%;
+    --destructive: 26 70% 40%;
+    --destructive-foreground: 26 94% 64%;
+    --border: 51 100% 50% / 0.2;
+    --input: 264 38% 16% / 0.5;
+    --ring: 51 100% 50%;
+  }
+}
+
+@layer base {
+  * {
+    border-color: hsl(var(--border));
+  }
+
+  body {
+    background-color: hsl(var(--background));
+    color: hsl(var(--foreground));
+    font-family: 'Inter', system-ui, -apple-system, sans-serif;
+  }
+
+  h1, h2, h3, h4, h5, h6 {
+    font-family: 'Montserrat', sans-serif;
+  }
+
+  html, body {
+    width: 100%;
+    min-height: 100%;
+    margin: 0;
+    padding: 0;
+  }
+  
+  #root {
+    width: 100%;
+    min-height: 100vh;
+  }
+}
+
+/* Cosmic utilities */
+.cosmic-bg {
+  background: linear-gradient(135deg, var(--cosmic-deep-blue) 0%, var(--cosmic-purple) 100%);
+}
+
+.star-field {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+  z-index: 0;
+}
+
+.star {
+  position: absolute;
+  background: var(--stellar-gold);
+  border-radius: 50%;
+  animation: twinkle 2s infinite alternate;
+}
+
+@keyframes twinkle {
+  from { opacity: 0.3; }
+  to { opacity: 1; }
+}
+
+@keyframes float {
+  0%, 100% { transform: translateY(0px); }
+  50% { transform: translateY(-20px); }
+}
+
+@keyframes rotate {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
+.floating-animation {
+  animation: float 6s ease-in-out infinite;
+}
+
+.rotating-animation {
+  animation: rotate 20s linear infinite;
+}
