@@ -224,16 +224,25 @@ export function ExoplanetDetectionScreen({ onBack }: ExoplanetDetectionScreenPro
         let response;
         
         if (selectedFile) {
-          // File upload mode
+          // File upload mode - show info toast for large files
+          toast.info('🔬 Processing CSV... Large files may take several minutes. Check the backend console for progress!', { duration: 60000 });
+          
           const formData = new FormData();
           formData.append('dataset', selectedFile);
           formData.append('preprocessing', enablePreprocessing.toString());
           formData.append('removeFalsePositives', removeFalsePositives.toString());
           
+          // Create AbortController for timeout (10 minutes for large CSVs)
+          const controller = new AbortController();
+          const timeoutId = setTimeout(() => controller.abort(), 600000); // 10 minutes
+          
           response = await fetch(`${API_BASE_URL}/classify`, {
             method: 'POST',
             body: formData,
+            signal: controller.signal
           });
+          
+          clearTimeout(timeoutId);
         } else {
           // Manual entry mode
           response = await fetch(`${API_BASE_URL}/classify`, {
@@ -256,17 +265,28 @@ export function ExoplanetDetectionScreen({ onBack }: ExoplanetDetectionScreenPro
         setResult(data);
         setProgress(100);
         clearInterval(progressInterval);
-        toast.success('Classification complete!');
+        
+        // Show different toast based on whether it's CSV or manual entry
+        if (data.csv_summary) {
+          toast.success(
+            `✅ CSV processed: ${data.csv_summary.confirmed_exoplanets}/${data.csv_summary.total_rows} confirmed exoplanets!`,
+            { duration: 5000 }
+          );
+        } else {
+          toast.success(`✅ ${data.classification} (${(data.confidence * 100).toFixed(1)}% confidence)`);
+        }
       } else {
         throw new Error(data.error || 'Classification failed');
       }
       
-    } catch (error) {
+    } catch (error: any) {
       console.error('Classification error:', error);
-      if (DEV_MODE) {
+      if (error.name === 'AbortError') {
+        toast.error('⏱️ Classification timed out (>10 min). Your CSV might be too large.');
+      } else if (DEV_MODE) {
         toast.error('Classification failed in development mode.');
       } else {
-        toast.error('Classification failed. Is the Flask backend running on port 5001?');
+        toast.error('❌ Classification failed. Is the Flask backend running on port 5001?');
       }
     } finally {
       setIsProcessing(false);
@@ -286,12 +306,10 @@ export function ExoplanetDetectionScreen({ onBack }: ExoplanetDetectionScreenPro
     }
 
     setIsProcessing(true);
-    setProgress(0);
+    setProgress(10);
 
     try {
-      const progressInterval = setInterval(() => {
-        setProgress(prev => Math.min(prev + 10, 90));
-      }, 1000);
+      toast.info('🔬 Processing FITS data - this may take 1-2 minutes. Watch the backend console for detailed progress!', { duration: 120000 });
 
       const formData = new FormData();
       
@@ -323,25 +341,41 @@ export function ExoplanetDetectionScreen({ onBack }: ExoplanetDetectionScreenPro
         formData.append('dec', manualStellarParams.dec);
       }
 
+      // Create AbortController for timeout (3 minutes for FITS processing)
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 180000); // 3 minutes
+
+      setProgress(20);
       const response = await fetch(`${API_BASE_URL}/process_fits`, {
         method: 'POST',
-        body: formData
+        body: formData,
+        signal: controller.signal
       });
 
-      const data = await response.json();
+      clearTimeout(timeoutId);
+      setProgress(80);
 
-      clearInterval(progressInterval);
+      const data = await response.json();
       setProgress(100);
 
       if (data.success) {
         setResult(data);
-        toast.success(`Analysis complete! ${data.classification}`);
+        toast.success(`✅ Analysis complete! ${data.classification} (${(data.confidence * 100).toFixed(1)}% confidence)`);
+        
+        // Show key results
+        if (data.tls_results) {
+          toast.info(`🔭 Period: ${data.tls_results.period.toFixed(2)} days, SDE: ${data.tls_results.sde.toFixed(2)}`, { duration: 8000 });
+        }
       } else {
         throw new Error(data.error || 'FITS processing failed');
       }
-    } catch (error) {
+    } catch (error: any) {
       console.error('FITS processing error:', error);
-      toast.error('FITS processing failed. Is lightkurve installed and the backend running?');
+      if (error.name === 'AbortError') {
+        toast.error('⏱️ FITS processing timed out (>3 min). The target may be too large or complex.');
+      } else {
+        toast.error(`❌ FITS processing failed: ${error.message || 'Unknown error'}`);
+      }
     } finally {
       setIsProcessing(false);
       setTimeout(() => setProgress(0), 1000);
@@ -1216,6 +1250,33 @@ export function ExoplanetDetectionScreen({ onBack }: ExoplanetDetectionScreenPro
                     </span>
                   </div>
                 </div>
+
+                {/* CSV Upload Summary - shown when processing CSV files */}
+                {result.csv_summary && (
+                  <div className="bg-gradient-to-r from-blue-500/20 to-purple-500/20 rounded-lg p-6 border-2 border-blue-500/50">
+                    <h3 className="text-xl font-bold text-blue-400 mb-4 flex items-center gap-2">
+                      <FileText className="w-5 h-5" />
+                      CSV Analysis Summary
+                    </h3>
+                    <div className="grid grid-cols-3 gap-4 mb-4">
+                      <div className="bg-black/30 rounded-lg p-3 text-center">
+                        <p className="text-gray-400 text-sm">Total Rows</p>
+                        <p className="text-2xl font-bold text-white">{result.csv_summary.total_rows}</p>
+                      </div>
+                      <div className="bg-black/30 rounded-lg p-3 text-center">
+                        <p className="text-gray-400 text-sm">Confirmed Exoplanets</p>
+                        <p className="text-2xl font-bold text-green-400">{result.csv_summary.confirmed_exoplanets}</p>
+                      </div>
+                      <div className="bg-black/30 rounded-lg p-3 text-center">
+                        <p className="text-gray-400 text-sm">False Positives</p>
+                        <p className="text-2xl font-bold text-red-400">{result.csv_summary.false_positives}</p>
+                      </div>
+                    </div>
+                    <p className="text-sm text-gray-300 italic">
+                      Showing detailed results for Row 0 below. All {result.csv_summary.total_rows} rows were classified - check backend console for full list.
+                    </p>
+                  </div>
+                )}
 
                 {/* Planetary Details */}
                 <div className="grid md:grid-cols-2 gap-4">

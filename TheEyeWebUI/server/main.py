@@ -13,9 +13,27 @@ import numpy as np
 import logging
 import joblib
 
-# Setup logging
-logging.basicConfig(level=logging.INFO)
+# Setup logging - show user output but suppress noisy libraries
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(levelname)s:%(name)s:%(message)s',
+    handlers=[
+        logging.StreamHandler(sys.stdout)
+    ]
+)
 logger = logging.getLogger(__name__)
+
+# Make Python output unbuffered so prints show immediately
+sys.stdout.reconfigure(line_buffering=True)
+sys.stderr.reconfigure(line_buffering=True)
+
+# Force flush after prints
+import builtins
+_original_print = builtins.print
+def _flushing_print(*args, **kwargs):
+    kwargs.setdefault('flush', True)
+    _original_print(*args, **kwargs)
+builtins.print = _flushing_print
 
 # Add project paths
 sys.path.append(str(Path(__file__).parent))
@@ -24,16 +42,31 @@ sys.path.append(str(Path(__file__).parent))
 from utils.data_preprocessor import ExoplanetDataPreprocessor
 from scripts.predict import predict
 # Import LightKurve functions
-import scripts.LK_src as lks
 try:
     import lightkurve as lk
+    import scripts.LK_src as lks
     LIGHTKURVE_AVAILABLE = True
+    logger.info("✅ lightkurve is available")
+    
+    # Suppress verbose library output after import
+    logging.getLogger('numba').setLevel(logging.WARNING)
+    logging.getLogger('matplotlib').setLevel(logging.WARNING)
+    logging.getLogger('PIL').setLevel(logging.WARNING)
+    logging.getLogger('urllib3').setLevel(logging.WARNING)
+    logging.getLogger('astropy').setLevel(logging.WARNING)
+    logging.getLogger('lightkurve').setLevel(logging.WARNING)
 except ImportError:
-    logger.warning("⚠️  lightkurve not installed. FITS file processing will be unavailable.")
+    lks = None
+    lk = None
     LIGHTKURVE_AVAILABLE = False
+    logger.warning("⚠️  lightkurve not installed. FITS file processing will be unavailable.")
 
 app = Flask(__name__)
 CORS(app)  # Enable CORS for React frontend 
+
+# Configure Flask logging - keep it clean
+app.logger.setLevel(logging.INFO)
+logging.getLogger('werkzeug').setLevel(logging.WARNING)
 
 # Initialize preprocessor
 preprocessor = ExoplanetDataPreprocessor()
@@ -44,10 +77,20 @@ MODEL_PATH = Path(__file__).parent / 'models' / 'exoplanet_rf_model.pkl'
 try:
     # Load model package saved by joblib
     model_package = joblib.load(MODEL_PATH)
-    model = model_package['model']
-    model_threshold = model_package.get('threshold', 0.5)
-    model_feature_mean = model_package.get('feature_mean', None)
-    model_feature_std = model_package.get('feature_std', None)
+    
+    # Handle both dictionary format and direct model format
+    if isinstance(model_package, dict):
+        model = model_package['model']
+        model_threshold = model_package.get('threshold', 0.5)
+        model_feature_mean = model_package.get('feature_mean', None)
+        model_feature_std = model_package.get('feature_std', None)
+    else:
+        # Direct model object - use defaults
+        model = model_package
+        model_threshold = 0.5
+        model_feature_mean = None
+        model_feature_std = None
+    
     logger.info(f"✅ Model loaded from {MODEL_PATH}")
     logger.info(f"   Threshold: {model_threshold}")
     model_loaded = True
@@ -95,17 +138,59 @@ def classify():
             upload_path = Path(__file__).parent / 'datasets' / 'uploaded_data.csv'
             file.save(upload_path)
             
-            logger.info(f"📁 Processing uploaded file: {upload_path}")
+            # Load original data first to show what we're working with
+            df = pd.read_csv(upload_path)
+            total_rows = len(df)
+            
+            logger.info(f"📁 Processing uploaded CSV: {file.filename}")
+            logger.info(f"   Total rows in file: {total_rows}")
+            logger.info(f"   Columns: {list(df.columns)}")
+            
+            # Warn about large files
+            if total_rows > 1000:
+                logger.warning(f"⚠️  Large CSV detected ({total_rows} rows). This may take several minutes to process...")
             
             # Preprocess CSV file
             X = preprocessor.preprocess_for_prediction(upload_path)
             
-            # Get first row for prediction (or you can predict all rows)
-            features = X[0]
+            # Process ALL rows and classify them
+            all_predictions = []
+            training_columns = preprocessor.REQUIRED_FEATURES
             
-            # Load original data for details
-            df = pd.read_csv(upload_path)
+            for i in range(len(X)):
+                candidate_df = pd.DataFrame([X[i]], columns=training_columns)
+                pred_class, prob = predict(candidate_df)
+                all_predictions.append({
+                    'row': int(i),  # Convert to native Python int
+                    'prediction': int(pred_class[0]),  # Convert numpy int64 to Python int
+                    'confidence': float(prob[0]),
+                    'classification': 'CONFIRMED EXOPLANET' if pred_class[0] == 1 else 'FALSE POSITIVE'
+                })
+                
+                # Progress logging for large files
+                if total_rows > 100 and (i + 1) % 100 == 0:
+                    confirmed_so_far = sum(1 for p in all_predictions if p['prediction'] == 1)
+                    logger.info(f"      Progress: {i+1}/{total_rows} rows processed ({confirmed_so_far} confirmed so far)...")
+            
+            # Log summary of all predictions
+            confirmed_count = sum(1 for p in all_predictions if p['prediction'] == 1)
+            logger.info(f"   📊 Results: {confirmed_count}/{total_rows} confirmed exoplanets")
+            for p in all_predictions[:5]:  # Show first 5
+                logger.info(f"      Row {p['row']}: {p['classification']} ({p['confidence']:.1%})")
+            if total_rows > 5:
+                logger.info(f"      ... and {total_rows - 5} more rows")
+            
+            # Use first row for detailed display (you can modify this to show the best candidate)
+            features = X[0]
             features_dict = df.iloc[0].to_dict()
+            
+            # Store all predictions for the response
+            csv_summary = {
+                'total_rows': total_rows,
+                'confirmed_exoplanets': confirmed_count,
+                'false_positives': total_rows - confirmed_count,
+                'all_results': all_predictions
+            }
         
         # Handle JSON manual entry
         else:
@@ -117,6 +202,9 @@ def classify():
             # Preprocess manual entry
             X = preprocessor.preprocess_for_prediction(features_dict)
             features = X[0]
+            
+            # No CSV summary for manual entry
+            csv_summary = None
         
         # Make prediction using the custom predict function
         # Create DataFrame with training column names for the predict function
@@ -153,7 +241,12 @@ def classify():
             'dataQuality': 'High' if confidence > 0.9 else 'Medium' if confidence > 0.7 else 'Low'
         }
         
-        logger.info(f"✅ Classification: {classification} (confidence: {confidence:.2%})")
+        # Add CSV summary if processing a CSV file
+        if csv_summary:
+            response['csv_summary'] = csv_summary
+            logger.info(f"✅ CSV Classification complete: {csv_summary['confirmed_exoplanets']}/{csv_summary['total_rows']} confirmed")
+        else:
+            logger.info(f"✅ Classification: {classification} (confidence: {confidence:.2%})")
         
         return jsonify(response)
         
@@ -223,10 +316,20 @@ def train():
             # Reload the newly trained model
             global model, model_loaded, model_threshold, model_feature_mean, model_feature_std
             model_package = joblib.load(MODEL_PATH)
-            model = model_package['model']
-            model_threshold = model_package.get('threshold', 0.5)
-            model_feature_mean = model_package.get('feature_mean', None)
-            model_feature_std = model_package.get('feature_std', None)
+            
+            # Handle both dictionary format and direct model format
+            if isinstance(model_package, dict):
+                model = model_package['model']
+                model_threshold = model_package.get('threshold', 0.5)
+                model_feature_mean = model_package.get('feature_mean', None)
+                model_feature_std = model_package.get('feature_std', None)
+            else:
+                # Direct model object - use defaults
+                model = model_package
+                model_threshold = 0.5
+                model_feature_mean = None
+                model_feature_std = None
+            
             model_loaded = True
             
             logger.info("✅ Model trained and reloaded successfully")
@@ -495,9 +598,17 @@ def process_fits():
                 'ra': catalog_data.get('ra'),
                 'dec': catalog_data.get('dec')
             },
-            'features': features,
+            'features': [
+                'Transit signature detected' if pred_class[0] == 1 else 'No clear transit signature',
+                'Periodic dimming pattern confirmed' if pred_class[0] == 1 else 'Irregular light curve',
+                f'TLS Period: {r.period:.3f} days',
+                f'Signal Detection Efficiency: {r.SDE:.2f}',
+                'Low false positive probability' if float(prob[0]) > 0.8 else 'Moderate uncertainty'
+            ],
             'planetType': _determine_planet_type(features) if pred_class[0] == 1 else None,
-            'details': _format_details(features)
+            'details': _format_details(features, catalog_data=catalog_data),
+            'similarExoplanets': _get_similar_exoplanets(_determine_planet_type(features)) if pred_class[0] == 1 else [],
+            'dataQuality': 'High' if float(prob[0]) > 0.9 else 'Medium' if float(prob[0]) > 0.7 else 'Low'
         }
         
         mode_str = f"with Planet ID '{target}'" if has_target_id else "with manual stellar parameters"
@@ -546,7 +657,7 @@ def _determine_planet_type(features_dict):
         return 'Unknown'
 
 
-def _format_details(features_dict):
+def _format_details(features_dict, catalog_data=None):
     """Format feature details for display"""
     # Helper to get value with multiple possible key names
     def get_val(dict_obj, *keys):
@@ -556,40 +667,59 @@ def _format_details(features_dict):
                 return val
         return 'N/A'
 
-    orbital_period = get_val(features_dict, 'orbital_period', 'Orbital Period', 'orbitalPeriod')
-    transit_duration = get_val(features_dict, 'transit_duration', 'Transition Duration', 'transitDuration')
-    transit_depth = get_val(features_dict, 'transit_depth', 'Transition Depth', 'transitDepth')
-    planetary_radius = get_val(features_dict, 'planetary_radius', 'Planet Rad', 'planetaryRadius')
-    equilibrium_temp = get_val(features_dict, 'planet_equilibrium_temp', 'Planet Eqbm Temp', 'planetEquilibriumTemp')
-    stellar_temp = get_val(features_dict, 'stellar_effective_temp', 'Stellar Effective Temp', 'stellarEffectiveTemp')
-    stellar_radius = get_val(features_dict, 'stellar_radius', 'Stellar Rad', 'stellarRadius')
-    stellar_log_g = get_val(features_dict, 'stellar_log_g', 'Stellar log g', 'stellarLogG')
-    ra = get_val(features_dict, 'ra')
-    dec = get_val(features_dict, 'dec')
+    # PRIORITIZE CATALOG DATA when available
+    if catalog_data:
+        orbital_period = get_val(features_dict, 'orbital_period', 'Orbital Period', 'orbitalPeriod')
+        transit_duration = get_val(features_dict, 'transit_duration', 'Transition Duration', 'transitDuration')
+        transit_depth = get_val(features_dict, 'transit_depth', 'Transition Depth', 'transitDepth')
+        planetary_radius = get_val(features_dict, 'planetary_radius', 'Planet Rad', 'planetaryRadius')
+        # Use catalog data for these fields
+        equilibrium_temp = catalog_data.get('pl_eqt') or get_val(features_dict, 'planet_equilibrium_temp', 'Planet Eqbm Temp', 'planetEquilibriumTemp')
+        stellar_temp = catalog_data.get('st_teff') or get_val(features_dict, 'stellar_effective_temp', 'Stellar Effective Temp', 'stellarEffectiveTemp')
+        stellar_radius = catalog_data.get('st_rad') or get_val(features_dict, 'stellar_radius', 'Stellar Rad', 'stellarRadius')
+        stellar_log_g = catalog_data.get('st_logg') or get_val(features_dict, 'stellar_log_g', 'Stellar log g', 'stellarLogG')
+        ra = catalog_data.get('ra') or get_val(features_dict, 'ra')
+        dec = catalog_data.get('dec') or get_val(features_dict, 'dec')
+    else:
+        # No catalog data, use features only
+        orbital_period = get_val(features_dict, 'orbital_period', 'Orbital Period', 'orbitalPeriod')
+        transit_duration = get_val(features_dict, 'transit_duration', 'Transition Duration', 'transitDuration')
+        transit_depth = get_val(features_dict, 'transit_depth', 'Transition Depth', 'transitDepth')
+        planetary_radius = get_val(features_dict, 'planetary_radius', 'Planet Rad', 'planetaryRadius')
+        equilibrium_temp = get_val(features_dict, 'planet_equilibrium_temp', 'Planet Eqbm Temp', 'planetEquilibriumTemp')
+        stellar_temp = get_val(features_dict, 'stellar_effective_temp', 'Stellar Effective Temp', 'stellarEffectiveTemp')
+        stellar_radius = get_val(features_dict, 'stellar_radius', 'Stellar Rad', 'stellarRadius')
+        stellar_log_g = get_val(features_dict, 'stellar_log_g', 'Stellar log g', 'stellarLogG')
+        ra = get_val(features_dict, 'ra')
+        dec = get_val(features_dict, 'dec')
 
-    # Calculate stellar mass using the formula from the image
-    # Ms,solar = (10^log(g) × (Rs,solar × 6.96 × 10^8)^2) / (100 × G × (1.989 × 10^30))
+    # PRIORITIZE catalog stellar mass, otherwise calculate
     stellar_mass = 'N/A'
-    try:
-        if stellar_log_g != 'N/A' and stellar_radius != 'N/A':
-            log_g = float(stellar_log_g)
-            R_solar = float(stellar_radius)
-            G = 6.67430e-11  # Gravitational constant in SI units
+    if catalog_data and catalog_data.get('st_mass'):
+        # Use catalog mass directly!
+        stellar_mass = f"{catalog_data['st_mass']:.3f} M☉"
+    else:
+        # Calculate stellar mass using the formula
+        try:
+            if stellar_log_g != 'N/A' and stellar_radius != 'N/A':
+                log_g = float(stellar_log_g)
+                R_solar = float(stellar_radius)
+                G = 6.67430e-11  # Gravitational constant in SI units
 
-            # Calculate stellar mass in solar masses
-            numerator = (10**log_g) * ((R_solar * 6.96e8) ** 2)
-            denominator = 100 * G * 1.989e30
-            M_solar = numerator / denominator
-            stellar_mass = f"{M_solar:.3f} M☉"
-    except (ValueError, TypeError, ZeroDivisionError):
-        stellar_mass = 'N/A'
+                # Calculate stellar mass in solar masses
+                numerator = (10**log_g) * ((R_solar * 6.96e8) ** 2)
+                denominator = 100 * G * 1.989e30
+                M_solar = numerator / denominator
+                stellar_mass = f"{M_solar:.3f} M☉"
+        except (ValueError, TypeError, ZeroDivisionError):
+            stellar_mass = 'N/A'
 
-    # Calculate planetary mass using mass-radius relationship
-    # For planets: M ≈ R^2.06 (empirical relationship for sub-Neptunes)
+    # PRIORITIZE catalog planetary mass, otherwise calculate
     estimated_mass = 'N/A'
-    try:
-        if planetary_radius != 'N/A':
-            R_planet = float(planetary_radius)
+    if catalog_data and catalog_data.get('koi_prad'):
+        # If catalog has planetary radius, calculate mass from it
+        try:
+            R_planet = float(catalog_data['koi_prad'])
             # Use Chen & Kipping (2017) mass-radius relationship
             if R_planet < 1.23:
                 # Rocky planets: M ∝ R^3.7
@@ -601,23 +731,47 @@ def _format_details(features_dict):
                 # Very large planets
                 M_planet = R_planet ** 1.0
             estimated_mass = f"{M_planet:.2f} M⊕"
-    except (ValueError, TypeError):
-        estimated_mass = 'N/A'
+        except (ValueError, TypeError):
+            pass
+    
+    # Fallback: calculate from features
+    if estimated_mass == 'N/A':
+        try:
+            if planetary_radius != 'N/A':
+                R_planet = float(planetary_radius)
+                # Use Chen & Kipping (2017) mass-radius relationship
+                if R_planet < 1.23:
+                    # Rocky planets: M ∝ R^3.7
+                    M_planet = R_planet ** 3.7
+                elif R_planet < 14.3:
+                    # Gas giants and sub-Neptunes: M ∝ R^2.06
+                    M_planet = R_planet ** 2.06
+                else:
+                    # Very large planets
+                    M_planet = R_planet ** 1.0
+                estimated_mass = f"{M_planet:.2f} M⊕"
+        except (ValueError, TypeError):
+            estimated_mass = 'N/A'
 
-    # Calculate distance from star using Kepler's third law
+    # PRIORITIZE catalog semi-major axis, otherwise calculate
     distance_from_star = 'N/A'
-    try:
-        if orbital_period != 'N/A' and stellar_mass != 'N/A' and 'M☉' in stellar_mass:
-            P_days = float(orbital_period)
-            M_star_solar = float(stellar_mass.split()[0])
+    if catalog_data and catalog_data.get('koi_sma'):
+        # Use catalog semi-major axis directly
+        distance_from_star = f"{catalog_data['koi_sma']:.4f} AU"
+    else:
+        # Calculate distance from star using Kepler's third law
+        try:
+            if orbital_period != 'N/A' and stellar_mass != 'N/A' and 'M☉' in stellar_mass:
+                P_days = float(orbital_period)
+                M_star_solar = float(stellar_mass.split()[0])
 
-            # Kepler's third law: a^3 = (M_star * P^2) / (4π^2)
-            # With P in years and a in AU, simplifies to: a^3 = M_star * P^2
-            P_years = P_days / 365.25
-            a_AU = (M_star_solar * P_years**2) ** (1/3)
-            distance_from_star = f"{a_AU:.4f} AU"
-    except (ValueError, TypeError, ZeroDivisionError):
-        distance_from_star = 'N/A'
+                # Kepler's third law: a^3 = (M_star * P^2) / (4π^2)
+                # With P in years and a in AU, simplifies to: a^3 = M_star * P^2
+                P_years = P_days / 365.25
+                a_AU = (M_star_solar * P_years**2) ** (1/3)
+                distance_from_star = f"{a_AU:.4f} AU"
+        except (ValueError, TypeError, ZeroDivisionError):
+            distance_from_star = 'N/A'
 
     # Determine stellar type based on temperature
     stellar_type = 'Unknown'

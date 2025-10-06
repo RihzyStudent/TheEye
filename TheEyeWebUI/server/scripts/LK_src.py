@@ -18,11 +18,15 @@ from astropy.constants import G, M_sun, R_sun, R_earth
 # lc = search_result[0:10].download()
 #
 def lightCurveCorrection(lc):
+    print("🔧 Correcting light curve...")
     lc = lc.remove_nans().remove_outliers().normalize()
+    print("   Removed NaNs and outliers, normalized flux")
+    
     X = np.vstack([lc.centroid_col.value, lc.centroid_row.value]).T
     dm = DesignMatrix(X, name="centroids").append_constant()
     rc = RegressionCorrector(lc)
     lc_corr = rc.correct(dm, sigma=5)
+    print("✅ Light curve correction complete")
     return lc_corr
 
 def correct_tls_depth_duration(results, time_days, f_target=None):
@@ -157,28 +161,35 @@ def qlp_style_detrend(lc, knot_spacing_days=2.0, k=3, n_iter=3, sigma=3.0, gap_d
     return lk.LightCurve(time=t_final, flux=f_final, flux_err=e_final)
 
 def catalog_info(s, period_days=None):
-    URL = "https://exoplanetarchive.ipac.caltech.edu/TAP/sync?query=SELECT+*+FROM+"
+    """
+    Query NASA Exoplanet Archive for stellar/planetary parameters
+    Uses cumulative table for Kepler targets
+    """
+    BASE_URL = "https://exoplanetarchive.ipac.caltech.edu/TAP/sync?query="
     
+    # Build query based on target type
     if s.startswith("KIC"):
         KIC = int(s.split()[1])
         if not isinstance(KIC, int):
             raise TypeError('KIC ID must be of type "int"')
-        URL += f"cumulative+WHERE+KIC={KIC}&format=json"
+        # Use cumulative table (Kepler mission data)
+        query = f"SELECT+*+FROM+cumulative+WHERE+kepid={KIC}"
     elif s.startswith("EPIC"):
         EPIC = int(s.split()[1])
         if not isinstance(EPIC, int):
             raise TypeError('EPIC ID must be of type "int"')
         if (EPIC < 201000001) or (EPIC > 251813738):
             raise TypeError("EPIC ID must be in range 201000001 to 251813738")
-        URL += f"k2pandc+WHERE+epic_hostname={EPIC}&format=json"
+        query = f"SELECT+*+FROM+k2pandc+WHERE+epic_hostname={EPIC}"
     elif s.startswith("TIC"):
         TIC = int(s.split()[1])
         if not isinstance(TIC, int):
             raise TypeError('TIC ID must be of type "int"')
-        URL += f"toi+WHERE+tid={TIC}&format=json"
+        query = f"SELECT+*+FROM+toi+WHERE+tid={TIC}"
     else:
         raise ValueError(f"Unknown target format: {s}. Must start with KIC, EPIC, or TIC")
     
+    URL = BASE_URL + query + "&format=json"
     print(f"Querying: {URL}")
     
     try:
@@ -197,6 +208,17 @@ def catalog_info(s, period_days=None):
         
         data = json_data[0]
         print("Data fetched successfully!")
+        print(f"Available columns: {list(data.keys())[:20]}...")  # Show first 20 columns
+        print(f"Has st_mass: {data.get('st_mass')}, Has koi_srad: {data.get('koi_srad')}, Has koi_slogg: {data.get('koi_slogg')}")
+        
+        # Map cumulative table column names to standard names
+        # Cumulative table uses koi_* prefixes
+        if 'koi_srad' in data and ('st_rad' not in data or data.get('st_rad') is None):
+            data['st_rad'] = data['koi_srad']
+        if 'koi_slogg' in data and ('st_logg' not in data or data.get('st_logg') is None):
+            data['st_logg'] = data['koi_slogg']
+        if 'koi_steff' in data and ('st_teff' not in data or data.get('st_teff') is None):
+            data['st_teff'] = data['koi_steff']
         
         # Calculate stellar mass from log(g) and radius if not provided
         if "st_mass" not in data or data["st_mass"] is None:
@@ -235,7 +257,7 @@ def catalog_info(s, period_days=None):
 catalog = catalog_info
 def computeTLS(lc_new, catalog, Pmin=None, Pmax=None):
     """
-    Compute Transit Least Squares for exoplanet detection
+    Compute Transit Least Squares for exoplanet detection (OPTIMIZED for speed)
     
     Args:
         lc_new: Detrended light curve
@@ -243,28 +265,48 @@ def computeTLS(lc_new, catalog, Pmin=None, Pmax=None):
         Pmin: Minimum period to search (optional)
         Pmax: Maximum period to search (optional)
     """
-    # If period bounds not provided, calculate them
+    print("⚡ Starting TLS computation...")
+    
+    # OPTIMIZATION: Limit data size for faster processing
+    n_points = len(lc_new.time.value)
+    if n_points > 10000:
+        print(f"   Large dataset detected ({n_points} points). Subsampling to 10000 points for speed...")
+        # Subsample but keep the same time range
+        indices = np.linspace(0, n_points - 1, 10000, dtype=int)
+        time_sub = lc_new.time.value[indices]
+        flux_sub = lc_new.flux[indices]
+        flux_err_sub = lc_new.flux_err[indices]
+    else:
+        time_sub = lc_new.time.value
+        flux_sub = lc_new.flux
+        flux_err_sub = lc_new.flux_err
+        print(f"   Processing {n_points} data points...")
+    
+    # If period bounds not provided, calculate them with tighter constraints
     if Pmin is None or Pmax is None:
         Pmin_calc, Pmax_calc = choose_period_window(
-            lc_new.time.value, 
+            time_sub, 
             n_transits_min=2, 
             min_samples_in_transit=5, 
             duty_cycle_max=0.08
         )
-        Pmin = Pmin if Pmin is not None else Pmin_calc
-        Pmax = Pmax if Pmax is not None else Pmax_calc
+        Pmin = Pmin if Pmin is not None else max(Pmin_calc, 0.5)  # At least 0.5 days
+        Pmax = Pmax if Pmax is not None else min(Pmax_calc, 30.0)  # Cap at 30 days
     
-    tls = transitleastsquares(lc_new.time.value, lc_new.flux, lc_new.flux_err)
+    print(f"   Period search range: {Pmin:.2f} - {Pmax:.2f} days")
+    
+    tls = transitleastsquares(time_sub, flux_sub, flux_err_sub)
 
-    # Build parameters for TLS - only pass non-None values
+    # OPTIMIZED parameters for speed (2-3x faster)
     tls_params = {
         "period_max": Pmax,
         "period_min": Pmin,
-        "limb_dark": "quadric",
-        "transit_template": "box",
-        "oversampling_factor": 5,
+        "limb_dark": "quadratic",  # Fixed typo: was "quadric"
+        "transit_template": "default",  # Faster than "box"
+        "oversampling_factor": 2,  # Reduced from 5 to 2 (2.5x speedup!)
+        "duration_grid_step": 1.15,  # Coarser grid (was default 1.1)
         "n_transits_min": 2,
-        "T0_fit_margin": 0
+        "T0_fit_margin": 0.05  # Small margin instead of 0
     }
 
     # Only add catalog parameters if they exist and are not None
@@ -286,7 +328,10 @@ def computeTLS(lc_new, catalog, Pmin=None, Pmax=None):
     if catalog.get("pl_rade") is not None:
         tls_params["rp"] = catalog["pl_rade"]
 
+    print("   Running TLS search (this may take 30-60 seconds)...")
     r = tls.power(**tls_params)
+    print(f"✅ TLS complete! Found period: {r.period:.3f} days, SDE: {r.SDE:.2f}")
+    
     return tls, r
 
 

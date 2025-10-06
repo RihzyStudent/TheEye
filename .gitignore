@@ -1,0 +1,44 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+venv/
+env/
+ENV/
+*.log
+
+# Node
+node_modules/
+.vite/
+dist/
+.npm
+.eslintcache
+
+# OS
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Model cache (keep the actual model)
+*.pkl.bak
+
+# Logs
+*.log
+backend_output.log
+/tmp/
+
+# Uploaded data
+uploaded_data.csv
+
