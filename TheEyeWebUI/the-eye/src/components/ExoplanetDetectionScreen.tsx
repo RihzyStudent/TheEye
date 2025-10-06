@@ -33,6 +33,10 @@ import { Badge } from './ui/badge';
 // Flask Backend API Configuration
 const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:5001';
 
+// Log API URL for debugging (will show in browser console)
+console.log('🔗 API Base URL:', API_BASE_URL);
+console.log('🌍 Environment:', import.meta.env.MODE);
+
 // Development mode - set to true to use mock data when Flask backend is not running
 const DEV_MODE = false; // change to true for development without backend
 
@@ -285,9 +289,9 @@ export function ExoplanetDetectionScreen({ onBack }: ExoplanetDetectionScreenPro
         toast.error('⏱️ Classification timed out (>10 min). Your CSV might be too large.');
       } else if (DEV_MODE) {
         toast.error('Classification failed in development mode.');
-      } else {
-        toast.error('❌ Classification failed. Is the Flask backend running on port 5001?');
-      }
+        } else {
+          toast.error(`❌ Classification failed. Check if backend is running at: ${API_BASE_URL}`);
+        }
     } finally {
       setIsProcessing(false);
     }
@@ -430,7 +434,7 @@ export function ExoplanetDetectionScreen({ onBack }: ExoplanetDetectionScreenPro
       if (DEV_MODE) {
         toast.error('Training failed in development mode.');
       } else {
-        toast.error('Training failed. Is the Flask backend running on port 5001?');
+        toast.error(`❌ Training failed. Check if backend is running at: ${API_BASE_URL}`);
       }
     } finally {
       setIsTraining(false);
