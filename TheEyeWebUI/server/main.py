@@ -23,9 +23,17 @@ sys.path.append(str(Path(__file__).parent))
 # Import utilities
 from utils.data_preprocessor import ExoplanetDataPreprocessor
 from scripts.predict import predict
+# Import LightKurve functions
+import scripts.LK_src as lks
+try:
+    import lightkurve as lk
+    LIGHTKURVE_AVAILABLE = True
+except ImportError:
+    logger.warning("⚠️  lightkurve not installed. FITS file processing will be unavailable.")
+    LIGHTKURVE_AVAILABLE = False
 
 app = Flask(__name__)
-CORS(app)  # Enable CORS for React frontend
+CORS(app)  # Enable CORS for React frontend 
 
 # Initialize preprocessor
 preprocessor = ExoplanetDataPreprocessor()
@@ -280,6 +288,227 @@ def train():
         
     except Exception as e:
         logger.error(f"❌ Training error: {e}")
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        }), 500
+
+
+@app.route('/process_fits', methods=['POST'])
+def process_fits():
+    """
+    Process FITS file using LightKurve to extract exoplanet features
+    
+    Two modes:
+    1. With Planet ID: Auto-fetch stellar info from catalog
+       - target: Target ID (e.g., "KIC 123456", "TIC 789012", "EPIC 345678")
+       - search_type: 'search' (download from archive) or 'data' (upload FITS)
+       - fits_file: FITS file (if search_type='data')
+    
+    2. FITS file only: Manual stellar parameters
+       - fits_file: FITS file upload (required)
+       - mission: 'Kepler' or 'TESS'
+       - Manual stellar parameters (optional, with defaults):
+         * stellar_mass, stellar_radius, stellar_teff, stellar_logg
+    """
+    if not LIGHTKURVE_AVAILABLE:
+        return jsonify({
+            'success': False,
+            'error': 'lightkurve is not installed. Please install it to use FITS processing.'
+        }), 501
+    
+    try:
+        data = request.form
+        target = data.get('target')  # Optional now
+        search_type = data.get('search_type', 'data')
+        mission = data.get('mission', 'Kepler')
+        
+        # Check if we have either a target ID or a FITS file
+        has_fits_file = 'fits_file' in request.files
+        has_target_id = target and target.strip()
+        
+        if not has_target_id and not has_fits_file:
+            return jsonify({
+                'success': False,
+                'error': 'Either target ID or FITS file is required'
+            }), 400
+        
+        if has_target_id:
+            logger.info(f"🔭 Processing with Planet ID: {target}")
+        else:
+            logger.info(f"🔭 Processing FITS file with manual stellar parameters")
+        
+        # Step 1: Get light curve data
+        if search_type == 'search' and has_target_id:
+            # Mode 1: Search and download from online archive using target ID
+            logger.info(f"📥 Downloading light curve for {target}...")
+            search_result = lk.search_lightcurve(target)
+            if len(search_result) == 0:
+                return jsonify({
+                    'success': False,
+                    'error': f'No light curve data found for {target}'
+                }), 404
+            lc = search_result[0:10].download()
+        elif has_fits_file:
+            # Mode 2: Load from uploaded FITS file
+            logger.info(f"📁 Loading FITS file...")
+            fits_file = request.files['fits_file']
+            fits_path = Path(__file__).parent / 'datasets' / 'temp_lightcurve.fits'
+            fits_file.save(fits_path)
+            lc = lk.read(fits_path)
+        else:
+            return jsonify({
+                'success': False,
+                'error': 'Invalid combination of parameters'
+            }), 400
+        
+        # Step 2: Correct light curve
+        logger.info("✨ Correcting light curve...")
+        lc_corr = lks.lightCurveCorrection(lc)
+        
+        # Step 3: Calculate period window
+        logger.info("📊 Calculating period search window...")
+        Pmin, Pmax = lks.choose_period_window(
+            lc_corr.time.value, 
+            n_transits_min=2, 
+            min_samples_in_transit=5, 
+            duty_cycle_max=0.08
+        )
+        logger.info(f"Period window: {Pmin:.2f} - {Pmax:.2f} days")
+        
+        # Step 4: Detrend light curve
+        logger.info("🌊 Detrending light curve...")
+        lc_new = lks.qlp_style_detrend(lc_corr)
+        
+        # Step 5: Get stellar catalog information
+        catalog_data = {}
+        if has_target_id:
+            # Mode 1: Auto-fetch from catalog using target ID
+            logger.info("📖 Fetching catalog information from NASA Exoplanet Archive...")
+            try:
+                catalog_data = lks.catalog(target, period_days=(Pmin + Pmax) / 2)
+            except Exception as e:
+                logger.warning(f"⚠️ Could not fetch catalog data: {e}")
+                catalog_data = {}
+        
+        # Mode 2 or fallback: Use manual stellar parameters (with defaults)
+        if not catalog_data or not catalog_data.get('st_mass'):
+            logger.info("📝 Using manual stellar parameters...")
+            catalog_data = {
+                'st_mass': float(data.get('stellar_mass', 1.0)),  # Solar masses
+                'st_rad': float(data.get('stellar_radius', 1.0)),  # Solar radii
+                'st_teff': float(data.get('stellar_teff', 5800)),  # Kelvin
+                'st_logg': float(data.get('stellar_logg', 4.5)),   # log(g)
+                'ra': float(data.get('ra', 0.0)),
+                'dec': float(data.get('dec', 0.0))
+            }
+            logger.info(f"   Using: M={catalog_data['st_mass']}☉, R={catalog_data['st_rad']}☉, T={catalog_data['st_teff']}K")
+        
+        # Step 6: Run TLS
+        logger.info("🔍 Running Transit Least Squares...")
+        tls, r = lks.computeTLS(lc_new, catalog_data, Pmin, Pmax)
+        
+        # Step 7: Get TPF and apply SAP correction
+        logger.info("🎯 Applying SAP correction...")
+        tpf = None
+        try:
+            if search_type == 'search' and has_target_id:
+                # Download TPF from archive
+                tpf = lk.search_targetpixelfile(target).download()
+            elif 'tpf_file' in request.files:
+                # Load TPF from upload
+                tpf_file = request.files['tpf_file']
+                tpf_path = Path(__file__).parent / 'datasets' / 'temp_tpf.fits'
+                tpf_file.save(tpf_path)
+                tpf = lk.read(tpf_path)
+            elif has_fits_file:
+                # Try to use the light curve FITS as TPF (may not work for all files)
+                tpf = lk.read(fits_path)
+        except Exception as e:
+            logger.warning(f"⚠️ Could not load TPF: {e}. Skipping SAP correction.")
+        
+        # Apply SAP correction if we have TPF
+        if tpf is not None:
+            try:
+                Depth, Dur_h, k = lks.sapCorrection(lc_new, r, tpf)
+                logger.info(f"✅ SAP correction applied: Depth={Depth:.1f}ppm, Duration={Dur_h:.2f}h")
+            except Exception as e:
+                logger.warning(f"⚠️ SAP correction failed: {e}. Using TLS raw values.")
+                # Use raw TLS values
+                Depth = float(r.depth) * 1e6  # Convert to ppm
+                Dur_h = float(r.duration) * 24  # Convert to hours
+        else:
+            # No TPF available, use raw TLS values
+            logger.info("ℹ️ Using raw TLS values (no TPF available)")
+            Depth = float(r.depth) * 1e6  # Convert to ppm
+            Dur_h = float(r.duration) * 24  # Convert to hours
+        
+        # Step 8: Extract features for ML model
+        features = {
+            'orbital_period': float(r.period),
+            'transit_duration': float(Dur_h),
+            'transit_depth': float(Depth) / 1e6,  # Convert ppm to fraction
+            'planetary_radius': float(r.rp_rs * catalog_data.get('st_rad', 1.0)),  # R_earth
+            'planet_equilibrium_temp': float(catalog_data.get('pl_eqt', 300)),
+            'stellar_effective_temp': float(catalog_data.get('st_teff', 5800)),
+            'stellar_log_g': float(catalog_data.get('st_logg', 4.5)),
+            'stellar_radius': float(catalog_data.get('st_rad', 1.0)),
+            'ra': float(catalog_data.get('ra', 0)),
+            'dec': float(catalog_data.get('dec', 0))
+        }
+        
+        # Step 9: Classify using ML model
+        X = preprocessor.preprocess_for_prediction(features)
+        training_columns = preprocessor.REQUIRED_FEATURES
+        candidate_df = pd.DataFrame([X[0]], columns=training_columns)
+        pred_class, prob = predict(candidate_df)
+        
+        classification = 'CONFIRMED EXOPLANET' if pred_class[0] == 1 else 'FALSE POSITIVE'
+        
+        response = {
+            'success': True,
+            'classification': classification,
+            'confidence': float(prob[0]),
+            'processing_mode': {
+                'has_target_id': has_target_id,
+                'target': target if has_target_id else None,
+                'stellar_data_source': 'catalog' if (has_target_id and catalog_data.get('st_mass')) else 'manual',
+                'tpf_available': tpf is not None
+            },
+            'tls_results': {
+                'period': float(r.period),
+                'sde': float(r.SDE),
+                't0': float(r.T0),
+                'depth_ppm': float(Depth),
+                'duration_hours': float(Dur_h),
+                'rp_rs': float(r.rp_rs),
+                'period_window': {
+                    'min': float(Pmin),
+                    'max': float(Pmax)
+                }
+            },
+            'stellar_params': {
+                'mass': catalog_data.get('st_mass'),
+                'radius': catalog_data.get('st_rad'),
+                'teff': catalog_data.get('st_teff'),
+                'logg': catalog_data.get('st_logg'),
+                'ra': catalog_data.get('ra'),
+                'dec': catalog_data.get('dec')
+            },
+            'features': features,
+            'planetType': _determine_planet_type(features) if pred_class[0] == 1 else None,
+            'details': _format_details(features)
+        }
+        
+        mode_str = f"with Planet ID '{target}'" if has_target_id else "with manual stellar parameters"
+        logger.info(f"✅ FITS processing complete {mode_str}: {classification} ({prob[0]:.2%} confidence)")
+        
+        return jsonify(response)
+        
+    except Exception as e:
+        logger.error(f"❌ FITS processing error: {e}")
+        import traceback
+        traceback.print_exc()
         return jsonify({
             'success': False,
             'error': str(e)

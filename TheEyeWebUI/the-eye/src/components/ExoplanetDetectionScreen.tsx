@@ -73,6 +73,23 @@ export function ExoplanetDetectionScreen({ onBack }: ExoplanetDetectionScreenPro
   const [result, setResult] = useState<any>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   
+  // FITS file processing
+  const [fitsFile, setFitsFile] = useState<File | null>(null);
+  const [tpfFile, setTpfFile] = useState<File | null>(null);
+  const [targetId, setTargetId] = useState('');
+  const [searchType, setSearchType] = useState<'search' | 'data'>('data');
+  const [mission, setMission] = useState<'Kepler' | 'TESS'>('Kepler');
+  const [manualStellarParams, setManualStellarParams] = useState({
+    stellarMass: '1.0',
+    stellarRadius: '1.0',
+    stellarTeff: '5800',
+    stellarLogg: '4.5',
+    ra: '0.0',
+    dec: '0.0'
+  });
+  const fitsInputRef = useRef<HTMLInputElement>(null);
+  const tpfInputRef = useRef<HTMLInputElement>(null);
+  
   // Model parameters
   const [learningRate, setLearningRate] = useState([0.001]);
   const [epochs, setEpochs] = useState([100]);
@@ -253,6 +270,81 @@ export function ExoplanetDetectionScreen({ onBack }: ExoplanetDetectionScreenPro
       }
     } finally {
       setIsProcessing(false);
+    }
+  };
+
+  const processFitsFile = async () => {
+    // Validation based on search type
+    if (searchType === 'search' && !targetId) {
+      toast.error('Target ID is required for Archive Download mode');
+      return;
+    }
+    
+    if (searchType === 'data' && !fitsFile && !targetId) {
+      toast.error('Please upload a FITS file or provide a Target ID');
+      return;
+    }
+
+    setIsProcessing(true);
+    setProgress(0);
+
+    try {
+      const progressInterval = setInterval(() => {
+        setProgress(prev => Math.min(prev + 10, 90));
+      }, 1000);
+
+      const formData = new FormData();
+      
+      // Add target ID if provided
+      if (targetId) {
+        formData.append('target', targetId);
+        formData.append('search_type', searchType);
+      }
+      
+      // Add FITS file if provided
+      if (fitsFile) {
+        formData.append('fits_file', fitsFile);
+        formData.append('mission', mission);
+        formData.append('search_type', 'data');
+      }
+      
+      // Add TPF file if provided
+      if (tpfFile) {
+        formData.append('tpf_file', tpfFile);
+      }
+      
+      // Add manual stellar parameters if no target ID
+      if (!targetId || searchType === 'data') {
+        formData.append('stellar_mass', manualStellarParams.stellarMass);
+        formData.append('stellar_radius', manualStellarParams.stellarRadius);
+        formData.append('stellar_teff', manualStellarParams.stellarTeff);
+        formData.append('stellar_logg', manualStellarParams.stellarLogg);
+        formData.append('ra', manualStellarParams.ra);
+        formData.append('dec', manualStellarParams.dec);
+      }
+
+      const response = await fetch(`${API_BASE_URL}/process_fits`, {
+        method: 'POST',
+        body: formData
+      });
+
+      const data = await response.json();
+
+      clearInterval(progressInterval);
+      setProgress(100);
+
+      if (data.success) {
+        setResult(data);
+        toast.success(`Analysis complete! ${data.classification}`);
+      } else {
+        throw new Error(data.error || 'FITS processing failed');
+      }
+    } catch (error) {
+      console.error('FITS processing error:', error);
+      toast.error('FITS processing failed. Is lightkurve installed and the backend running?');
+    } finally {
+      setIsProcessing(false);
+      setTimeout(() => setProgress(0), 1000);
     }
   };
 
@@ -465,10 +557,14 @@ export function ExoplanetDetectionScreen({ onBack }: ExoplanetDetectionScreenPro
           {/* Main Content - Left Column */}
           <div className="lg:col-span-2 space-y-6">
             <Tabs defaultValue="upload" className="w-full">
-              <TabsList className="grid w-full grid-cols-2 bg-white/10">
+              <TabsList className="grid w-full grid-cols-3 bg-white/10">
                 <TabsTrigger value="upload" className="data-[state=active]:bg-stellar-gold data-[state=active]:text-cosmic-deep-blue">
                   <Database className="w-4 h-4 mr-2" />
                   Dataset Upload
+                </TabsTrigger>
+                <TabsTrigger value="fits" className="data-[state=active]:bg-stellar-gold data-[state=active]:text-cosmic-deep-blue">
+                  <Activity className="w-4 h-4 mr-2" />
+                  FITS Analysis
                 </TabsTrigger>
                 <TabsTrigger value="manual" className="data-[state=active]:bg-stellar-gold data-[state=active]:text-cosmic-deep-blue">
                   <Plus className="w-4 h-4 mr-2" />
@@ -538,6 +634,237 @@ export function ExoplanetDetectionScreen({ onBack }: ExoplanetDetectionScreenPro
                       className="hidden"
                       accept=".csv,.json,.txt"
                     />
+                  </CardContent>
+                </Card>
+              </TabsContent>
+
+              {/* FITS File Analysis Tab */}
+              <TabsContent value="fits" className="space-y-4">
+                <Card className="bg-cosmic-deep-blue/50 border-stellar-gold/30">
+                  <CardHeader>
+                    <CardTitle className="text-stellar-gold flex items-center gap-2">
+                      <Activity className="w-5 h-5" />
+                      FITS File Processing
+                    </CardTitle>
+                    <CardDescription className="text-white/70">
+                      Process light curve FITS files using LightKurve analysis
+                    </CardDescription>
+                  </CardHeader>
+                  <CardContent className="space-y-6">
+                    {/* Target ID or FITS Upload Options */}
+                    <div className="space-y-4">
+                      <div className="flex items-center justify-between">
+                        <Label className="text-white font-semibold">Processing Mode</Label>
+                        <Select value={searchType} onValueChange={(value: 'search' | 'data') => setSearchType(value)}>
+                          <SelectTrigger className="w-[200px] bg-white/10 border-stellar-gold/30 text-white">
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="search">Download from Archive</SelectItem>
+                            <SelectItem value="data">Upload FITS File</SelectItem>
+                          </SelectContent>
+                        </Select>
+                      </div>
+
+                      {/* Target ID Input (for search mode or with FITS) */}
+                      <div className="space-y-2">
+                        <Label htmlFor="targetId" className="text-white flex items-center gap-2">
+                          Target ID 
+                          {searchType === 'search' ? (
+                            <Badge variant="outline" className="bg-stellar-gold/20 text-stellar-gold border-stellar-gold">Required</Badge>
+                          ) : (
+                            <Badge variant="outline" className="bg-white/10 text-white/70 border-white/30">Optional</Badge>
+                          )}
+                        </Label>
+                        <Input
+                          id="targetId"
+                          type="text"
+                          placeholder="e.g., KIC 12345678, TIC 789012, EPIC 345678"
+                          value={targetId}
+                          onChange={(e) => setTargetId(e.target.value)}
+                          className="bg-white/10 border-stellar-gold/30 text-white placeholder:text-white/50"
+                        />
+                        <p className="text-xs text-white/60">
+                          {searchType === 'search' 
+                            ? '⚡ Downloads light curve and auto-fetches stellar parameters from NASA archive'
+                            : '💡 Optional: Provide Target ID to auto-fetch stellar parameters, or specify them manually below'}
+                        </p>
+                      </div>
+
+                      {/* Mission Selection */}
+                      {searchType === 'data' && (
+                        <div className="space-y-2">
+                          <Label className="text-white">Mission</Label>
+                          <Select value={mission} onValueChange={(value: 'Kepler' | 'TESS') => setMission(value)}>
+                            <SelectTrigger className="bg-white/10 border-stellar-gold/30 text-white">
+                              <SelectValue />
+                            </SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="Kepler">Kepler</SelectItem>
+                              <SelectItem value="TESS">TESS</SelectItem>
+                            </SelectContent>
+                          </Select>
+                        </div>
+                      )}
+
+                      {/* FITS File Upload */}
+                      {searchType === 'data' && (
+                        <div className="space-y-4">
+                          <div className="space-y-2">
+                            <Label htmlFor="fitsFile" className="text-white">
+                              Light Curve FITS File *
+                            </Label>
+                            <div className="flex gap-2">
+                              <Input
+                                id="fitsFile"
+                                ref={fitsInputRef}
+                                type="file"
+                                accept=".fits,.fit"
+                                onChange={(e) => setFitsFile(e.target.files?.[0] || null)}
+                                className="bg-white/10 border-stellar-gold/30 text-white file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-stellar-gold file:text-cosmic-deep-blue hover:file:bg-stellar-gold/80"
+                              />
+                            </div>
+                            {fitsFile && (
+                              <p className="text-sm text-stellar-gold">
+                                Selected: {fitsFile.name}
+                              </p>
+                            )}
+                          </div>
+
+                          <div className="space-y-2">
+                            <Label htmlFor="tpfFile" className="text-white">
+                              Target Pixel File (optional)
+                            </Label>
+                            <div className="flex gap-2">
+                              <Input
+                                id="tpfFile"
+                                ref={tpfInputRef}
+                                type="file"
+                                accept=".fits,.fit"
+                                onChange={(e) => setTpfFile(e.target.files?.[0] || null)}
+                                className="bg-white/10 border-stellar-gold/30 text-white file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-stellar-gold file:text-cosmic-deep-blue hover:file:bg-stellar-gold/80"
+                              />
+                            </div>
+                            {tpfFile && (
+                              <p className="text-sm text-stellar-gold">
+                                Selected: {tpfFile.name}
+                              </p>
+                            )}
+                            <p className="text-xs text-white/60">
+                              Optional: Improves SAP correction accuracy
+                            </p>
+                          </div>
+                        </div>
+                      )}
+
+                      {/* Manual Stellar Parameters (shown only if no target ID and uploading FITS) */}
+                      {!targetId && searchType === 'data' && (
+                        <div className="space-y-4 p-4 bg-white/5 rounded-lg border border-stellar-gold/20">
+                          <h4 className="text-white font-semibold flex items-center gap-2">
+                            <Globe2 className="w-4 h-4" />
+                            Manual Stellar Parameters (Optional)
+                          </h4>
+                          <p className="text-xs text-white/60">
+                            Leave blank to use defaults: M=1.0☉, R=1.0☉, Teff=5800K, log(g)=4.5
+                          </p>
+                          
+                          <div className="grid grid-cols-2 gap-4">
+                            <div className="space-y-2">
+                              <Label htmlFor="stellarMass" className="text-white text-sm">
+                                Stellar Mass (M☉)
+                              </Label>
+                              <Input
+                                id="stellarMass"
+                                type="number"
+                                step="0.01"
+                                value={manualStellarParams.stellarMass}
+                                onChange={(e) => setManualStellarParams(prev => ({ ...prev, stellarMass: e.target.value }))}
+                                className="bg-white/10 border-stellar-gold/30 text-white"
+                                placeholder="1.0"
+                              />
+                            </div>
+                            <div className="space-y-2">
+                              <Label htmlFor="stellarRadius" className="text-white text-sm">
+                                Stellar Radius (R☉)
+                              </Label>
+                              <Input
+                                id="stellarRadius"
+                                type="number"
+                                step="0.01"
+                                value={manualStellarParams.stellarRadius}
+                                onChange={(e) => setManualStellarParams(prev => ({ ...prev, stellarRadius: e.target.value }))}
+                                className="bg-white/10 border-stellar-gold/30 text-white"
+                                placeholder="1.0"
+                              />
+                            </div>
+                            <div className="space-y-2">
+                              <Label htmlFor="stellarTeff" className="text-white text-sm">
+                                Effective Temp (K)
+                              </Label>
+                              <Input
+                                id="stellarTeff"
+                                type="number"
+                                step="1"
+                                value={manualStellarParams.stellarTeff}
+                                onChange={(e) => setManualStellarParams(prev => ({ ...prev, stellarTeff: e.target.value }))}
+                                className="bg-white/10 border-stellar-gold/30 text-white"
+                                placeholder="5800"
+                              />
+                            </div>
+                            <div className="space-y-2">
+                              <Label htmlFor="stellarLogg" className="text-white text-sm">
+                                log(g)
+                              </Label>
+                              <Input
+                                id="stellarLogg"
+                                type="number"
+                                step="0.01"
+                                value={manualStellarParams.stellarLogg}
+                                onChange={(e) => setManualStellarParams(prev => ({ ...prev, stellarLogg: e.target.value }))}
+                                className="bg-white/10 border-stellar-gold/30 text-white"
+                                placeholder="4.5"
+                              />
+                            </div>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Process Button */}
+                    <Button 
+                      onClick={processFitsFile}
+                      disabled={
+                        isProcessing || 
+                        (searchType === 'search' && !targetId) ||
+                        (searchType === 'data' && !fitsFile && !targetId)
+                      }
+                      className="w-full bg-gradient-to-r from-stellar-gold via-cosmic-purple to-stellar-gold bg-size-200 bg-pos-0 hover:bg-pos-100 transition-all duration-500 text-cosmic-deep-blue font-bold py-6"
+                    >
+                      {isProcessing ? (
+                        <>
+                          <RefreshCw className="w-5 h-5 mr-2 animate-spin" />
+                          Processing FITS Data...
+                        </>
+                      ) : (
+                        <>
+                          <Brain className="w-5 h-5 mr-2" />
+                          Analyze with LightKurve + ML
+                        </>
+                      )}
+                    </Button>
+
+                    {isProcessing && (
+                      <div className="space-y-2">
+                        <Progress value={progress} className="h-2" />
+                        <p className="text-sm text-center text-white/70">
+                          {progress < 20 && 'Loading light curve...'}
+                          {progress >= 20 && progress < 40 && 'Correcting and detrending...'}
+                          {progress >= 40 && progress < 60 && 'Running Transit Least Squares...'}
+                          {progress >= 60 && progress < 80 && 'Applying SAP corrections...'}
+                          {progress >= 80 && 'Classifying with ML model...'}
+                        </p>
+                      </div>
+                    )}
                   </CardContent>
                 </Card>
               </TabsContent>
