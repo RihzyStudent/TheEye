@@ -110,17 +110,13 @@ def classify():
             X = preprocessor.preprocess_for_prediction(features_dict)
             features = X[0]
         
-        # Make prediction using your friend's custom predict function with outlier penalties
-        # Map column names to match the training data format
-        training_columns = [
-            'Orbital Period', 'Transition Duration', 'Transition Depth',
-            'Planet Rad', 'Planet Eqbm Temp', 'Stellar Effective Temp',
-            'Stellar log g', 'Stellar Rad', 'ra', 'dec'
-        ]
-        features_df = pd.DataFrame([features], columns=training_columns)
+        # Make prediction using the custom predict function
+        # Create DataFrame with training column names for the predict function
+        training_columns = preprocessor.REQUIRED_FEATURES
+        candidate_df = pd.DataFrame([features], columns=training_columns)
         
-        # Use custom predict function (returns pred_class, prob)
-        pred_class, prob = predict(features_df)
+        # Use custom predict function with outlier penalties
+        pred_class, prob = predict(candidate_df)
         prediction = pred_class[0]
         confidence = float(prob[0])
         
@@ -297,13 +293,13 @@ def _determine_planet_type(features_dict):
     try:
         # Try multiple possible key names
         radius = float(
-            features_dict.get('planetary_radius') or 
-            features_dict.get('Planet Rad') or 
+            features_dict.get('planetary_radius') or
+            features_dict.get('Planet Rad') or
             features_dict.get('planetaryRadius') or 1
         )
         temp = float(
-            features_dict.get('planet_equilibrium_temp') or 
-            features_dict.get('Planet Eqbm Temp') or 
+            features_dict.get('planet_equilibrium_temp') or
+            features_dict.get('Planet Eqbm Temp') or
             features_dict.get('planetEquilibriumTemp') or 300
         )
         
@@ -330,7 +326,7 @@ def _format_details(features_dict):
             if val is not None:
                 return val
         return 'N/A'
-    
+
     orbital_period = get_val(features_dict, 'orbital_period', 'Orbital Period', 'orbitalPeriod')
     transit_duration = get_val(features_dict, 'transit_duration', 'Transition Duration', 'transitDuration')
     transit_depth = get_val(features_dict, 'transit_depth', 'Transition Depth', 'transitDepth')
@@ -341,7 +337,7 @@ def _format_details(features_dict):
     stellar_log_g = get_val(features_dict, 'stellar_log_g', 'Stellar log g', 'stellarLogG')
     ra = get_val(features_dict, 'ra')
     dec = get_val(features_dict, 'dec')
-    
+
     # Calculate stellar mass using the formula from the image
     # Ms,solar = (10^log(g) × (Rs,solar × 6.96 × 10^8)^2) / (100 × G × (1.989 × 10^30))
     stellar_mass = 'N/A'
@@ -350,7 +346,7 @@ def _format_details(features_dict):
             log_g = float(stellar_log_g)
             R_solar = float(stellar_radius)
             G = 6.67430e-11  # Gravitational constant in SI units
-            
+
             # Calculate stellar mass in solar masses
             numerator = (10**log_g) * ((R_solar * 6.96e8) ** 2)
             denominator = 100 * G * 1.989e30
@@ -358,7 +354,7 @@ def _format_details(features_dict):
             stellar_mass = f"{M_solar:.3f} M☉"
     except (ValueError, TypeError, ZeroDivisionError):
         stellar_mass = 'N/A'
-    
+
     # Calculate planetary mass using mass-radius relationship
     # For planets: M ≈ R^2.06 (empirical relationship for sub-Neptunes)
     estimated_mass = 'N/A'
@@ -378,14 +374,14 @@ def _format_details(features_dict):
             estimated_mass = f"{M_planet:.2f} M⊕"
     except (ValueError, TypeError):
         estimated_mass = 'N/A'
-    
+
     # Calculate distance from star using Kepler's third law
     distance_from_star = 'N/A'
     try:
         if orbital_period != 'N/A' and stellar_mass != 'N/A' and 'M☉' in stellar_mass:
             P_days = float(orbital_period)
             M_star_solar = float(stellar_mass.split()[0])
-            
+
             # Kepler's third law: a^3 = (M_star * P^2) / (4π^2)
             # With P in years and a in AU, simplifies to: a^3 = M_star * P^2
             P_years = P_days / 365.25
@@ -393,7 +389,7 @@ def _format_details(features_dict):
             distance_from_star = f"{a_AU:.4f} AU"
     except (ValueError, TypeError, ZeroDivisionError):
         distance_from_star = 'N/A'
-    
+
     # Determine stellar type based on temperature
     stellar_type = 'Unknown'
     try:
@@ -417,7 +413,7 @@ def _format_details(features_dict):
                 stellar_type = 'Brown dwarf'
     except (ValueError, TypeError):
         stellar_type = 'Unknown'
-    
+
     return {
         'orbitalPeriod': f"{orbital_period} days",
         'transitDuration': f"{transit_duration} hours",
