@@ -31,7 +31,7 @@ import { Switch } from './ui/switch';
 import { Badge } from './ui/badge';
 
 // Flask Backend API Configuration
-const API_BASE_URL = 'http://localhost:5001';
+const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:5001';
 
 // Development mode - set to true to use mock data when Flask backend is not running
 const DEV_MODE = false; // change to true for development without backend

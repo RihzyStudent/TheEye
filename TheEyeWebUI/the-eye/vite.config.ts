@@ -62,5 +62,11 @@ export default defineConfig({
     removeVersionSpecifiers(), 
     ...(produceSingleFile ? [viteSingleFile()] : [])
   ],
+  // GitHub Pages deployment: set base to repository name
+  base: process.env.NODE_ENV === 'production' ? '/TheEye/' : '/',
+  build: {
+    outDir: 'dist',
+    sourcemap: false,
+  }
 })
 

@@ -62,7 +62,17 @@ except ImportError:
     logger.warning("⚠️  lightkurve not installed. FITS file processing will be unavailable.")
 
 app = Flask(__name__)
-CORS(app)  # Enable CORS for React frontend 
+
+# Enable CORS for both local development and production
+CORS(app, resources={
+    r"/*": {
+        "origins": [
+            "http://localhost:5173",  # Local development
+            "http://localhost:5001",  # Local backend testing
+            "https://rihzystudent.github.io"  # GitHub Pages production
+        ]
+    }
+})
 
 # Configure Flask logging - keep it clean
 app.logger.setLevel(logging.INFO)
@@ -829,12 +839,17 @@ def _get_similar_exoplanets(planet_type):
 
 
 if __name__ == '__main__':
+    import os
+    
+    # Use PORT from environment (for Render/Railway) or default to 5001
+    port = int(os.environ.get('PORT', 5001))
+    
     print("=" * 50)
     print("🚀 Exoplanet Detection ML Server")
     print("=" * 50)
     print(f"📦 Model loaded: {model_loaded}")
     print(f"📍 Model path: {MODEL_PATH}")
-    print(f"🌐 Server starting on http://localhost:5001")
+    print(f"🌐 Server starting on http://0.0.0.0:{port}")
     print("=" * 50)
     
-    app.run(debug=True, port=5001, host='0.0.0.0')
+    app.run(debug=True, port=port, host='0.0.0.0')
