@@ -30,6 +30,12 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '.
 import { Switch } from './ui/switch';
 import { Badge } from './ui/badge';
 
+// Flask Backend API Configuration
+const API_BASE_URL = 'http://localhost:5000';
+
+// Development mode - set to true to use mock data when Flask backend is not running
+const DEV_MODE = false; // change to true for development without backend
+
 interface ExoplanetDetectionScreenProps {
   onBack: () => void;
 }
@@ -49,11 +55,14 @@ interface ModelStats {
 interface ExoplanetData {
   orbitalPeriod: string;
   transitDuration: string;
-  planetaryRadius: string;
   transitDepth: string;
+  planetaryRadius: string;
+  planetEquilibriumTemp: string;
+  stellarEffectiveTemp: string;
+  stellarLogG: string;
   stellarRadius: string;
-  stellarMagnitude: string;
-  temperature: string;
+  ra: string;
+  dec: string;
 }
 
 export function ExoplanetDetectionScreen({ onBack }: ExoplanetDetectionScreenProps) {
@@ -76,11 +85,14 @@ export function ExoplanetDetectionScreen({ onBack }: ExoplanetDetectionScreenPro
   const [manualData, setManualData] = useState<ExoplanetData>({
     orbitalPeriod: '',
     transitDuration: '',
-    planetaryRadius: '',
     transitDepth: '',
+    planetaryRadius: '',
+    planetEquilibriumTemp: '',
+    stellarEffectiveTemp: '',
+    stellarLogG: '',
     stellarRadius: '',
-    stellarMagnitude: '',
-    temperature: ''
+    ra: '',
+    dec: ''
   });
 
   // Model statistics (mock data - will be updated from your backend)
@@ -95,6 +107,65 @@ export function ExoplanetDetectionScreen({ onBack }: ExoplanetDetectionScreenPro
     lastTrained: 'Not trained yet',
     modelVersion: 'v1.0.0'
   });
+
+  // Mock training response for development
+  const mockTrainResponse = async () => {
+    return new Promise<any>((resolve) => {
+      setTimeout(() => {
+        resolve({
+          success: true,
+          stats: {
+            accuracy: 0.947 + Math.random() * 0.02,
+            precision: 0.940 + Math.random() * 0.02,
+            recall: 0.965 + Math.random() * 0.02,
+            f1Score: 0.952 + Math.random() * 0.02,
+            totalSamples: 15420,
+            confirmedExoplanets: 3847,
+            falsePositives: 234,
+            lastTrained: new Date().toLocaleString(),
+            modelVersion: 'v1.0.0'
+          }
+        });
+      }, 2000);
+    });
+  };
+
+  // Mock classification response for development
+  const mockClassifyResponse = async () => {
+    return new Promise<any>((resolve) => {
+      setTimeout(() => {
+        const isExoplanet = Math.random() > 0.3;
+        resolve({
+          success: true,
+          classification: isExoplanet ? 'CONFIRMED EXOPLANET' : 'FALSE POSITIVE',
+          confidence: 0.85 + Math.random() * 0.15,
+          planetType: isExoplanet ? ['Hot Jupiter', 'Super-Earth', 'Neptune-like', 'Rocky Planet'][Math.floor(Math.random() * 4)] : null,
+          details: {
+            orbitalPeriod: `${manualData.orbitalPeriod || '3.52'} days`,
+            transitDuration: `${manualData.transitDuration || '2.8'} hours`,
+            planetaryRadius: `${manualData.planetaryRadius || '1.2'} Earth radii`,
+            estimatedMass: '1.07 Earth masses',
+            distanceFromStar: '0.169 AU',
+            equilibriumTemp: `${manualData.planetEquilibriumTemp || '1450'} K`,
+            stellarType: 'G-type main-sequence',
+            hostStarTemp: `${manualData.stellarEffectiveTemp || '5778'} K`
+          },
+          features: [
+            'Transit signature detected',
+            'Periodic dimming pattern confirmed',
+            'Doppler shift measured',
+            'Low false positive probability'
+          ],
+          similarExoplanets: [
+            'HD 209458 b',
+            '51 Pegasi b',
+            'WASP-12b'
+          ],
+          dataQuality: 'High'
+        });
+      }, 1500);
+    });
+  };
 
   const handleFileSelect = (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
@@ -126,68 +197,60 @@ export function ExoplanetDetectionScreen({ onBack }: ExoplanetDetectionScreenPro
         setProgress(prev => Math.min(prev + 10, 90));
       }, 200);
 
-      // TODO: Replace with actual API call to your exoplanet detection model
-      /*
-      const formData = new FormData();
-      if (selectedFile) {
-        formData.append('dataset', selectedFile);
-      } else {
-        formData.append('data', JSON.stringify(manualData));
-      }
-      formData.append('preprocessing', enablePreprocessing.toString());
-      formData.append('removeFalsePositives', removeFalsePositives.toString());
-      
-      const response = await fetch('YOUR_API_ENDPOINT/classify', {
-        method: 'POST',
-        body: formData,
-        headers: {
-          'Authorization': `Bearer ${YOUR_API_KEY}`,
-        }
-      });
-      
-      const data = await response.json();
-      setResult(data);
-      */
+      let data;
 
-      // Mock response for demonstration
-      await new Promise(resolve => setTimeout(resolve, 2000));
+      if (DEV_MODE) {
+        // Use mock data in development mode
+        data = await mockClassifyResponse();
+      } else {
+        // Use real Flask backend
+        let response;
+        
+        if (selectedFile) {
+          // File upload mode
+          const formData = new FormData();
+          formData.append('dataset', selectedFile);
+          formData.append('preprocessing', enablePreprocessing.toString());
+          formData.append('removeFalsePositives', removeFalsePositives.toString());
+          
+          response = await fetch(`${API_BASE_URL}/classify`, {
+            method: 'POST',
+            body: formData,
+          });
+        } else {
+          // Manual entry mode
+          response = await fetch(`${API_BASE_URL}/classify`, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+              data: manualData,
+              preprocessing: enablePreprocessing,
+              removeFalsePositives: removeFalsePositives
+            })
+          });
+        }
+        
+        data = await response.json();
+      }
       
-      const mockResult = {
-        classification: 'CONFIRMED EXOPLANET',
-        confidence: 0.947,
-        planetType: 'Hot Jupiter',
-        details: {
-          orbitalPeriod: manualData.orbitalPeriod || '3.52 days',
-          transitDuration: manualData.transitDuration || '2.8 hours',
-          planetaryRadius: manualData.planetaryRadius || '1.2 Jupiter radii',
-          estimatedMass: '0.89 Jupiter masses',
-          distanceFromStar: '0.048 AU',
-          equilibriumTemp: manualData.temperature || '1450 K',
-          stellarType: 'G-type main-sequence',
-          hostStarTemp: '5778 K'
-        },
-        features: [
-          'Transit signature detected',
-          'Periodic dimming pattern',
-          'Doppler shift confirmed',
-          'Low false positive probability'
-        ],
-        similarExoplanets: [
-          'HD 209458 b',
-          '51 Pegasi b',
-          'WASP-12b'
-        ],
-        dataQuality: 'High'
-      };
-      
-      setResult(mockResult);
-      setProgress(100);
-      clearInterval(progressInterval);
-      toast.success('Classification complete!');
+      if (data.success) {
+        setResult(data);
+        setProgress(100);
+        clearInterval(progressInterval);
+        toast.success('Classification complete!');
+      } else {
+        throw new Error(data.error || 'Classification failed');
+      }
       
     } catch (error) {
       console.error('Classification error:', error);
-      toast.error('Classification failed. Please check your backend connection.');
+      if (DEV_MODE) {
+        toast.error('Classification failed in development mode.');
+      } else {
+        toast.error('Classification failed. Is the Flask backend running on port 5000?');
+      }
     } finally {
       setIsProcessing(false);
     }
@@ -202,50 +265,47 @@ export function ExoplanetDetectionScreen({ onBack }: ExoplanetDetectionScreenPro
         setProgress(prev => Math.min(prev + 5, 95));
       }, 500);
 
-      // TODO: Replace with actual training API call
-      /*
-      const response = await fetch('YOUR_API_ENDPOINT/train', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${YOUR_API_KEY}`,
-        },
-        body: JSON.stringify({
-          dataset: selectedDataset,
-          learningRate: learningRate[0],
-          epochs: epochs[0],
-          batchSize: batchSize[0],
-          preprocessing: enablePreprocessing,
-          removeFalsePositives: removeFalsePositives
-        })
-      });
-      
-      const data = await response.json();
-      setModelStats(data.stats);
-      */
+      let data;
 
-      // Mock training simulation
-      await new Promise(resolve => setTimeout(resolve, 5000));
+      if (DEV_MODE) {
+        // Use mock data in development mode
+        data = await mockTrainResponse();
+      } else {
+        // Use real Flask backend
+        const response = await fetch(`${API_BASE_URL}/train`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            dataset: selectedDataset,
+            learningRate: learningRate[0],
+            epochs: epochs[0],
+            batchSize: batchSize[0],
+            preprocessing: enablePreprocessing,
+            removeFalsePositives: removeFalsePositives
+          })
+        });
+        
+        data = await response.json();
+      }
       
-      setModelStats({
-        accuracy: 0.952 + Math.random() * 0.03,
-        precision: 0.943 + Math.random() * 0.03,
-        recall: 0.968 + Math.random() * 0.02,
-        f1Score: 0.955 + Math.random() * 0.03,
-        totalSamples: 15420,
-        confirmedExoplanets: 3847,
-        falsePositives: Math.floor(200 + Math.random() * 50),
-        lastTrained: new Date().toLocaleString(),
-        modelVersion: 'v1.0.0'
-      });
-      
-      setProgress(100);
-      clearInterval(progressInterval);
-      toast.success('Model training completed successfully!');
+      if (data.success) {
+        setModelStats(data.stats);
+        setProgress(100);
+        clearInterval(progressInterval);
+        toast.success('Model training completed successfully!');
+      } else {
+        throw new Error(data.error || 'Training failed');
+      }
       
     } catch (error) {
       console.error('Training error:', error);
-      toast.error('Training failed. Please check your backend connection.');
+      if (DEV_MODE) {
+        toast.error('Training failed in development mode.');
+      } else {
+        toast.error('Training failed. Is the Flask backend running on port 5000?');
+      }
     } finally {
       setIsTraining(false);
       setTimeout(() => setProgress(0), 1000);
@@ -259,11 +319,14 @@ export function ExoplanetDetectionScreen({ onBack }: ExoplanetDetectionScreenPro
     setManualData({
       orbitalPeriod: '',
       transitDuration: '',
-      planetaryRadius: '',
       transitDepth: '',
+      planetaryRadius: '',
+      planetEquilibriumTemp: '',
+      stellarEffectiveTemp: '',
+      stellarLogG: '',
       stellarRadius: '',
-      stellarMagnitude: '',
-      temperature: ''
+      ra: '',
+      dec: ''
     });
     if (fileInputRef.current) {
       fileInputRef.current.value = '';
@@ -309,14 +372,21 @@ export function ExoplanetDetectionScreen({ onBack }: ExoplanetDetectionScreenPro
           </div>
         </div>
         
-        <Button 
-          variant="ghost" 
-          size="sm"
-          onClick={handleReset}
-          className="text-pure-white hover:bg-white/10"
-        >
-          Reset
-        </Button>
+        <div className="flex items-center gap-3">
+          {DEV_MODE && (
+            <Badge variant="outline" className="border-yellow-500 text-yellow-500 bg-yellow-500/10">
+              🧪 Dev Mode (Mock Data)
+            </Badge>
+          )}
+          <Button 
+            variant="ghost" 
+            size="sm"
+            onClick={handleReset}
+            className="text-pure-white hover:bg-white/10"
+          >
+            Reset
+          </Button>
+        </div>
       </div>
 
       <div className="max-w-7xl mx-auto p-6 space-y-6 relative z-10">
@@ -380,7 +450,7 @@ export function ExoplanetDetectionScreen({ onBack }: ExoplanetDetectionScreenPro
                 <p className="text-xl font-bold text-pure-white">{modelStats.totalSamples.toLocaleString()}</p>
               </div>
               <div className="bg-black/20 rounded p-3 text-center">
-                <p className="text-gray-400 text-sm">Confirmed Exoplanets</p>
+                <p className="text-gray-400 text-sm">Candidate Exoplanets</p>
                 <p className="text-xl font-bold text-green-400">{modelStats.confirmedExoplanets.toLocaleString()}</p>
               </div>
               <div className="bg-black/20 rounded p-3 text-center">
@@ -511,6 +581,18 @@ export function ExoplanetDetectionScreen({ onBack }: ExoplanetDetectionScreenPro
                       </div>
                       
                       <div>
+                        <Label className="text-gray-300">Transit Depth (%)</Label>
+                        <Input
+                          type="number"
+                          step="0.001"
+                          placeholder="e.g., 0.015"
+                          value={manualData.transitDepth}
+                          onChange={(e) => updateManualData('transitDepth', e.target.value)}
+                          className="bg-black/30 border-stellar-gold/30 text-pure-white mt-1"
+                        />
+                      </div>
+                      
+                      <div>
                         <Label className="text-gray-300">Planetary Radius (R⊕)</Label>
                         <Input
                           type="number"
@@ -523,13 +605,37 @@ export function ExoplanetDetectionScreen({ onBack }: ExoplanetDetectionScreenPro
                       </div>
                       
                       <div>
-                        <Label className="text-gray-300">Transit Depth (%)</Label>
+                        <Label className="text-gray-300">Planet Equilibrium Temp (K)</Label>
                         <Input
                           type="number"
-                          step="0.001"
-                          placeholder="e.g., 0.015"
-                          value={manualData.transitDepth}
-                          onChange={(e) => updateManualData('transitDepth', e.target.value)}
+                          step="1"
+                          placeholder="e.g., 1450"
+                          value={manualData.planetEquilibriumTemp}
+                          onChange={(e) => updateManualData('planetEquilibriumTemp', e.target.value)}
+                          className="bg-black/30 border-stellar-gold/30 text-pure-white mt-1"
+                        />
+                      </div>
+                      
+                      <div>
+                        <Label className="text-gray-300">Stellar Effective Temp (K)</Label>
+                        <Input
+                          type="number"
+                          step="1"
+                          placeholder="e.g., 5778"
+                          value={manualData.stellarEffectiveTemp}
+                          onChange={(e) => updateManualData('stellarEffectiveTemp', e.target.value)}
+                          className="bg-black/30 border-stellar-gold/30 text-pure-white mt-1"
+                        />
+                      </div>
+                      
+                      <div>
+                        <Label className="text-gray-300">Stellar Log G (cgs)</Label>
+                        <Input
+                          type="number"
+                          step="0.01"
+                          placeholder="e.g., 4.44"
+                          value={manualData.stellarLogG}
+                          onChange={(e) => updateManualData('stellarLogG', e.target.value)}
                           className="bg-black/30 border-stellar-gold/30 text-pure-white mt-1"
                         />
                       </div>
@@ -547,25 +653,25 @@ export function ExoplanetDetectionScreen({ onBack }: ExoplanetDetectionScreenPro
                       </div>
                       
                       <div>
-                        <Label className="text-gray-300">Stellar Magnitude</Label>
+                        <Label className="text-gray-300">RA - Right Ascension (deg)</Label>
                         <Input
                           type="number"
-                          step="0.01"
-                          placeholder="e.g., 5.5"
-                          value={manualData.stellarMagnitude}
-                          onChange={(e) => updateManualData('stellarMagnitude', e.target.value)}
+                          step="0.0001"
+                          placeholder="e.g., 285.6789"
+                          value={manualData.ra}
+                          onChange={(e) => updateManualData('ra', e.target.value)}
                           className="bg-black/30 border-stellar-gold/30 text-pure-white mt-1"
                         />
                       </div>
                       
-                      <div className="md:col-span-2">
-                        <Label className="text-gray-300">Equilibrium Temperature (K)</Label>
+                      <div>
+                        <Label className="text-gray-300">DEC - Declination (deg)</Label>
                         <Input
                           type="number"
-                          step="1"
-                          placeholder="e.g., 1450"
-                          value={manualData.temperature}
-                          onChange={(e) => updateManualData('temperature', e.target.value)}
+                          step="0.0001"
+                          placeholder="e.g., 38.7833"
+                          value={manualData.dec}
+                          onChange={(e) => updateManualData('dec', e.target.value)}
                           className="bg-black/30 border-stellar-gold/30 text-pure-white mt-1"
                         />
                       </div>
@@ -881,22 +987,7 @@ export function ExoplanetDetectionScreen({ onBack }: ExoplanetDetectionScreenPro
           </motion.div>
         )}
 
-        {/* Integration Instructions */}
-        <Card className="bg-white/5 border-stellar-gold/20">
-          <CardHeader>
-            <CardTitle className="text-pure-white text-sm">Backend Integration Instructions</CardTitle>
-          </CardHeader>
-          <CardContent className="text-gray-300 text-sm space-y-2">
-            <p>To connect your exoplanet detection ML model:</p>
-            <ol className="list-decimal list-inside space-y-1 ml-2">
-              <li>Update the <code className="bg-black/50 px-2 py-1 rounded text-stellar-gold">classifyData</code> function with your classification API endpoint</li>
-              <li>Update the <code className="bg-black/50 px-2 py-1 rounded text-stellar-gold">trainModel</code> function with your training API endpoint</li>
-              <li>Configure your API authentication in environment variables</li>
-              <li>Map the response data to match the result display format</li>
-            </ol>
-            <p className="pt-2">See <code className="bg-black/50 px-2 py-1 rounded text-stellar-gold">/AI_ML_INTEGRATION_GUIDE.md</code> for detailed integration steps.</p>
-          </CardContent>
-        </Card>
+
       </div>
     </div>
   );

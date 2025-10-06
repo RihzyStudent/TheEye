@@ -1,0 +1,11 @@
+id,orbital_period,transit_duration,planetary_radius,transit_depth,stellar_radius,stellar_magnitude,stellar_temperature,equilibrium_temperature,semi_major_axis,eccentricity,inclination,impact_parameter,signal_to_noise,number_of_transits,data_quality,false_positive_flag,confirmed,label,discovery_method
+KOI-123.01,3.52,2.8,1.2,0.015,1.0,12.5,5778,1450,0.048,0.02,89.5,0.3,45.2,127,high,0,1,1,Transit
+KOI-456.02,385.5,6.2,0.95,0.0045,0.89,13.8,5450,275,1.02,0.05,88.2,0.5,12.8,12,medium,0,1,1,Transit
+KOI-789.01,4.2,1.5,2.8,0.032,1.15,11.2,6100,890,0.055,0.0,89.8,0.2,28.5,98,high,1,0,0,Transit
+KOI-234.01,12.5,4.1,3.5,0.025,1.2,10.8,5900,720,0.12,0.01,89.0,0.4,32.1,45,high,0,1,1,Transit
+KOI-567.01,7.8,3.2,1.8,0.018,0.95,14.2,5300,980,0.08,0.03,88.5,0.35,21.5,67,medium,0,1,1,Transit
+KOI-890.01,2.1,1.8,8.2,0.045,1.05,11.9,5850,1820,0.032,0.0,90.0,0.1,55.8,180,high,0,1,1,Transit
+KOI-345.02,125.3,5.5,1.1,0.0052,0.88,15.1,5100,320,0.68,0.08,87.8,0.6,8.2,8,low,0,1,1,Transit
+KOI-678.01,5.5,2.5,2.2,0.022,1.1,12.1,5650,1150,0.065,0.02,89.2,0.38,28.9,78,high,1,0,0,Transit
+KOI-901.01,42.8,4.8,4.1,0.038,1.3,10.5,6200,580,0.28,0.15,88.0,0.45,18.7,25,medium,0,1,1,Transit
+KOI-123.02,18.2,3.6,1.5,0.012,0.92,13.5,5400,650,0.15,0.04,89.1,0.42,15.3,38,medium,0,1,1,Transit
