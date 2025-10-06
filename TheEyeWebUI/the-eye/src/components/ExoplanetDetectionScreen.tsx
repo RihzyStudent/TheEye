@@ -31,7 +31,7 @@ import { Switch } from './ui/switch';
 import { Badge } from './ui/badge';
 
 // Flask Backend API Configuration
-const API_BASE_URL = 'http://localhost:5000';
+const API_BASE_URL = 'http://localhost:5001';
 
 // Development mode - set to true to use mock data when Flask backend is not running
 const DEV_MODE = false; // change to true for development without backend
@@ -249,7 +249,7 @@ export function ExoplanetDetectionScreen({ onBack }: ExoplanetDetectionScreenPro
       if (DEV_MODE) {
         toast.error('Classification failed in development mode.');
       } else {
-        toast.error('Classification failed. Is the Flask backend running on port 5000?');
+        toast.error('Classification failed. Is the Flask backend running on port 5001?');
       }
     } finally {
       setIsProcessing(false);
@@ -304,7 +304,7 @@ export function ExoplanetDetectionScreen({ onBack }: ExoplanetDetectionScreenPro
       if (DEV_MODE) {
         toast.error('Training failed in development mode.');
       } else {
-        toast.error('Training failed. Is the Flask backend running on port 5000?');
+        toast.error('Training failed. Is the Flask backend running on port 5001?');
       }
     } finally {
       setIsTraining(false);

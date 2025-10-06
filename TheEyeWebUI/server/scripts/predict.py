@@ -2,14 +2,16 @@
 import pandas as pd
 import joblib
 import numpy as np
+from pathlib import Path
 
 # -----------------------------
 # Load the saved model package
 # -----------------------------
-model_package = joblib.load('exoplanet_rf_model.pkl')
+MODEL_PATH = Path(__file__).parent.parent / 'models' / 'exoplanet_rf_model.pkl'
+model_package = joblib.load(MODEL_PATH)
 model = model_package['model']
 threshold = (model_package['threshold'])*0.90
-# print(threshold0
+# print(threshold)
 feature_mean = model_package['feature_mean']
 feature_std = model_package['feature_std'] #standard deviation
 

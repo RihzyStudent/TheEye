@@ -11,6 +11,7 @@ import pandas as pd
 import pickle
 import numpy as np
 import logging
+import joblib
 
 # Setup logging
 logging.basicConfig(level=logging.INFO)
@@ -21,6 +22,7 @@ sys.path.append(str(Path(__file__).parent))
 
 # Import utilities
 from utils.data_preprocessor import ExoplanetDataPreprocessor
+from scripts.predict import predict
 
 app = Flask(__name__)
 CORS(app)  # Enable CORS for React frontend
@@ -32,13 +34,21 @@ preprocessor = ExoplanetDataPreprocessor()
 MODEL_PATH = Path(__file__).parent / 'models' / 'exoplanet_rf_model.pkl'
 
 try:
-    with open(MODEL_PATH, 'rb') as f:
-        model = pickle.load(f)
+    # Load model package saved by joblib
+    model_package = joblib.load(MODEL_PATH)
+    model = model_package['model']
+    model_threshold = model_package.get('threshold', 0.5)
+    model_feature_mean = model_package.get('feature_mean', None)
+    model_feature_std = model_package.get('feature_std', None)
     logger.info(f"✅ Model loaded from {MODEL_PATH}")
+    logger.info(f"   Threshold: {model_threshold}")
     model_loaded = True
 except Exception as e:
     logger.error(f"❌ Failed to load model: {e}")
     model = None
+    model_threshold = 0.5
+    model_feature_mean = None
+    model_feature_std = None
     model_loaded = False
 
 
@@ -100,16 +110,19 @@ def classify():
             X = preprocessor.preprocess_for_prediction(features_dict)
             features = X[0]
         
-        # Make prediction using YOUR model
-        prediction = model.predict([features])[0]
+        # Make prediction using your friend's custom predict function with outlier penalties
+        # Map column names to match the training data format
+        training_columns = [
+            'Orbital Period', 'Transition Duration', 'Transition Depth',
+            'Planet Rad', 'Planet Eqbm Temp', 'Stellar Effective Temp',
+            'Stellar log g', 'Stellar Rad', 'ra', 'dec'
+        ]
+        features_df = pd.DataFrame([features], columns=training_columns)
         
-        # Get probability/confidence if available
-        try:
-            probabilities = model.predict_proba([features])[0]
-            confidence = float(max(probabilities))
-        except AttributeError:
-            # Model doesn't have predict_proba (e.g., not a probabilistic model)
-            confidence = 0.95  # Default confidence
+        # Use custom predict function (returns pred_class, prob)
+        pred_class, prob = predict(features_df)
+        prediction = pred_class[0]
+        confidence = float(prob[0])
         
         # Determine classification
         classification = 'CONFIRMED EXOPLANET' if prediction == 1 else 'FALSE POSITIVE'
@@ -204,9 +217,12 @@ def train():
             )
             
             # Reload the newly trained model
-            global model, model_loaded
-            with open(MODEL_PATH, 'rb') as f:
-                model = pickle.load(f)
+            global model, model_loaded, model_threshold, model_feature_mean, model_feature_std
+            model_package = joblib.load(MODEL_PATH)
+            model = model_package['model']
+            model_threshold = model_package.get('threshold', 0.5)
+            model_feature_mean = model_package.get('feature_mean', None)
+            model_feature_std = model_package.get('feature_std', None)
             model_loaded = True
             
             logger.info("✅ Model trained and reloaded successfully")
@@ -279,8 +295,17 @@ def train():
 def _determine_planet_type(features_dict):
     """Determine planet type based on features"""
     try:
-        radius = float(features_dict.get('planetary_radius', 1))
-        temp = float(features_dict.get('planet_equilibrium_temp', 300))
+        # Try multiple possible key names
+        radius = float(
+            features_dict.get('planetary_radius') or 
+            features_dict.get('Planet Rad') or 
+            features_dict.get('planetaryRadius') or 1
+        )
+        temp = float(
+            features_dict.get('planet_equilibrium_temp') or 
+            features_dict.get('Planet Eqbm Temp') or 
+            features_dict.get('planetEquilibriumTemp') or 300
+        )
         
         if radius > 10:
             return 'Gas Giant'
@@ -298,16 +323,116 @@ def _determine_planet_type(features_dict):
 
 def _format_details(features_dict):
     """Format feature details for display"""
+    # Helper to get value with multiple possible key names
+    def get_val(dict_obj, *keys):
+        for key in keys:
+            val = dict_obj.get(key)
+            if val is not None:
+                return val
+        return 'N/A'
+    
+    orbital_period = get_val(features_dict, 'orbital_period', 'Orbital Period', 'orbitalPeriod')
+    transit_duration = get_val(features_dict, 'transit_duration', 'Transition Duration', 'transitDuration')
+    transit_depth = get_val(features_dict, 'transit_depth', 'Transition Depth', 'transitDepth')
+    planetary_radius = get_val(features_dict, 'planetary_radius', 'Planet Rad', 'planetaryRadius')
+    equilibrium_temp = get_val(features_dict, 'planet_equilibrium_temp', 'Planet Eqbm Temp', 'planetEquilibriumTemp')
+    stellar_temp = get_val(features_dict, 'stellar_effective_temp', 'Stellar Effective Temp', 'stellarEffectiveTemp')
+    stellar_radius = get_val(features_dict, 'stellar_radius', 'Stellar Rad', 'stellarRadius')
+    stellar_log_g = get_val(features_dict, 'stellar_log_g', 'Stellar log g', 'stellarLogG')
+    ra = get_val(features_dict, 'ra')
+    dec = get_val(features_dict, 'dec')
+    
+    # Calculate stellar mass using the formula from the image
+    # Ms,solar = (10^log(g) × (Rs,solar × 6.96 × 10^8)^2) / (100 × G × (1.989 × 10^30))
+    stellar_mass = 'N/A'
+    try:
+        if stellar_log_g != 'N/A' and stellar_radius != 'N/A':
+            log_g = float(stellar_log_g)
+            R_solar = float(stellar_radius)
+            G = 6.67430e-11  # Gravitational constant in SI units
+            
+            # Calculate stellar mass in solar masses
+            numerator = (10**log_g) * ((R_solar * 6.96e8) ** 2)
+            denominator = 100 * G * 1.989e30
+            M_solar = numerator / denominator
+            stellar_mass = f"{M_solar:.3f} M☉"
+    except (ValueError, TypeError, ZeroDivisionError):
+        stellar_mass = 'N/A'
+    
+    # Calculate planetary mass using mass-radius relationship
+    # For planets: M ≈ R^2.06 (empirical relationship for sub-Neptunes)
+    estimated_mass = 'N/A'
+    try:
+        if planetary_radius != 'N/A':
+            R_planet = float(planetary_radius)
+            # Use Chen & Kipping (2017) mass-radius relationship
+            if R_planet < 1.23:
+                # Rocky planets: M ∝ R^3.7
+                M_planet = R_planet ** 3.7
+            elif R_planet < 14.3:
+                # Gas giants and sub-Neptunes: M ∝ R^2.06
+                M_planet = R_planet ** 2.06
+            else:
+                # Very large planets
+                M_planet = R_planet ** 1.0
+            estimated_mass = f"{M_planet:.2f} M⊕"
+    except (ValueError, TypeError):
+        estimated_mass = 'N/A'
+    
+    # Calculate distance from star using Kepler's third law
+    distance_from_star = 'N/A'
+    try:
+        if orbital_period != 'N/A' and stellar_mass != 'N/A' and 'M☉' in stellar_mass:
+            P_days = float(orbital_period)
+            M_star_solar = float(stellar_mass.split()[0])
+            
+            # Kepler's third law: a^3 = (M_star * P^2) / (4π^2)
+            # With P in years and a in AU, simplifies to: a^3 = M_star * P^2
+            P_years = P_days / 365.25
+            a_AU = (M_star_solar * P_years**2) ** (1/3)
+            distance_from_star = f"{a_AU:.4f} AU"
+    except (ValueError, TypeError, ZeroDivisionError):
+        distance_from_star = 'N/A'
+    
+    # Determine stellar type based on temperature
+    stellar_type = 'Unknown'
+    try:
+        if stellar_temp != 'N/A':
+            temp_K = float(stellar_temp)
+            if temp_K >= 30000:
+                stellar_type = 'O-type (Blue)'
+            elif temp_K >= 10000:
+                stellar_type = 'B-type (Blue-white)'
+            elif temp_K >= 7500:
+                stellar_type = 'A-type (White)'
+            elif temp_K >= 6000:
+                stellar_type = 'F-type (Yellow-white)'
+            elif temp_K >= 5200:
+                stellar_type = 'G-type (Yellow) - Sun-like'
+            elif temp_K >= 3700:
+                stellar_type = 'K-type (Orange)'
+            elif temp_K >= 2400:
+                stellar_type = 'M-type (Red dwarf)'
+            else:
+                stellar_type = 'Brown dwarf'
+    except (ValueError, TypeError):
+        stellar_type = 'Unknown'
+    
     return {
-        'orbitalPeriod': f"{features_dict.get('orbital_period', 'N/A')} days",
-        'transitDuration': f"{features_dict.get('transit_duration', 'N/A')} hours",
-        'transitDepth': f"{features_dict.get('transit_depth', 'N/A')}",
-        'planetaryRadius': f"{features_dict.get('planetary_radius', 'N/A')} Earth radii",
-        'equilibriumTemp': f"{features_dict.get('planet_equilibrium_temp', 'N/A')} K",
-        'stellarTemp': f"{features_dict.get('stellar_effective_temp', 'N/A')} K",
-        'stellarRadius': f"{features_dict.get('stellar_radius', 'N/A')} solar radii",
-        'stellarLogG': f"{features_dict.get('stellar_log_g', 'N/A')}",
-        'coordinates': f"RA: {features_dict.get('ra', 'N/A')}°, DEC: {features_dict.get('dec', 'N/A')}°"
+        'orbitalPeriod': f"{orbital_period} days",
+        'transitDuration': f"{transit_duration} hours",
+        'transitDepth': f"{transit_depth}",
+        'planetaryRadius': f"{planetary_radius} Earth radii",
+        'estimatedMass': estimated_mass,
+        'distanceFromStar': distance_from_star,
+        'equilibriumTemp': f"{equilibrium_temp} K",
+        'stellarTemp': f"{stellar_temp} K",
+        'stellarType': stellar_type,
+        'stellarRadius': f"{stellar_radius} solar radii",
+        'stellarLogG': f"{stellar_log_g}",
+        'stellarMass': stellar_mass,
+        'hostStarTemp': f"{stellar_temp} K",  # Alternative field name for frontend
+        'coordinates': f"RA: {ra}°, DEC: {dec}°"
     }
 
 
@@ -330,7 +455,7 @@ if __name__ == '__main__':
     print("=" * 50)
     print(f"📦 Model loaded: {model_loaded}")
     print(f"📍 Model path: {MODEL_PATH}")
-    print(f"🌐 Server starting on http://localhost:5000")
+    print(f"🌐 Server starting on http://localhost:5001")
     print("=" * 50)
     
-    app.run(debug=True, port=5000, host='0.0.0.0')
+    app.run(debug=True, port=5001, host='0.0.0.0')

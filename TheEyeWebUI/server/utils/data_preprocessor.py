@@ -19,22 +19,42 @@ class ExoplanetDataPreprocessor:
     Handles loading, cleaning, and preparing data for ML models
     """
     
-    # Required features in exact order for the model
+    # Required features in exact order for the model (training data format)
     REQUIRED_FEATURES = [
-        'orbital_period',
-        'transit_duration',
-        'transit_depth',
-        'planetary_radius',
-        'planet_equilibrium_temp',
-        'stellar_effective_temp',
-        'stellar_log_g',
-        'stellar_radius',
+        'Orbital Period',
+        'Transition Duration',
+        'Transition Depth',
+        'Planet Rad',
+        'Planet Eqbm Temp',
+        'Stellar Effective Temp',
+        'Stellar log g',
+        'Stellar Rad',
         'ra',
         'dec'
     ]
     
+    # Column name mapping (frontend/API names -> training data names)
+    COLUMN_MAPPING = {
+        'orbital_period': 'Orbital Period',
+        'transit_duration': 'Transition Duration',
+        'transit_depth': 'Transition Depth',
+        'planetary_radius': 'Planet Rad',
+        'planetaryRadius': 'Planet Rad',
+        'planet_equilibrium_temp': 'Planet Eqbm Temp',
+        'planetEquilibriumTemp': 'Planet Eqbm Temp',
+        'stellar_effective_temp': 'Stellar Effective Temp',
+        'stellarEffectiveTemp': 'Stellar Effective Temp',
+        'stellar_log_g': 'Stellar log g',
+        'stellarLogG': 'Stellar log g',
+        'stellar_radius': 'Stellar Rad',
+        'stellarRadius': 'Stellar Rad',
+        'transitDuration': 'Transition Duration',
+        'transitDepth': 'Transition Depth',
+        'orbitalPeriod': 'Orbital Period',
+    }
+    
     # Optional label column for training
-    LABEL_COLUMN = 'label'
+    LABEL_COLUMN = 'Output'  # Changed to match training data
     
     def __init__(self, feature_columns: List[str] = None):
         """
@@ -45,6 +65,30 @@ class ExoplanetDataPreprocessor:
         """
         self.feature_columns = feature_columns or self.REQUIRED_FEATURES
         self.feature_stats = None  # For normalization if needed
+    
+    def normalize_column_names(self, df: pd.DataFrame) -> pd.DataFrame:
+        """
+        Normalize column names using the mapping
+        
+        Args:
+            df: Input DataFrame
+            
+        Returns:
+            DataFrame with normalized column names
+        """
+        df_normalized = df.copy()
+        
+        # Create a reverse mapping for columns that need renaming
+        rename_map = {}
+        for old_name, new_name in self.COLUMN_MAPPING.items():
+            if old_name in df_normalized.columns and old_name != new_name:
+                rename_map[old_name] = new_name
+        
+        if rename_map:
+            df_normalized = df_normalized.rename(columns=rename_map)
+            logger.info(f"✅ Normalized column names: {list(rename_map.keys())} -> {list(rename_map.values())}")
+        
+        return df_normalized
     
     def load_csv(self, file_path: Union[str, Path]) -> pd.DataFrame:
         """
@@ -59,6 +103,8 @@ class ExoplanetDataPreprocessor:
         try:
             df = pd.read_csv(file_path)
             logger.info(f"✅ Loaded {len(df)} records from {file_path}")
+            # Normalize column names
+            df = self.normalize_column_names(df)
             return df
         except FileNotFoundError:
             logger.error(f"❌ File not found: {file_path}")
@@ -240,8 +286,12 @@ class ExoplanetDataPreprocessor:
             df = self.load_csv(data)
         elif isinstance(data, dict):
             df = pd.DataFrame([data])
+            # Normalize column names for dictionary input
+            df = self.normalize_column_names(df)
         elif isinstance(data, pd.DataFrame):
             df = data.copy()
+            # Normalize column names
+            df = self.normalize_column_names(df)
         else:
             raise ValueError(f"Unsupported data type: {type(data)}")
         

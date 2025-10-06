@@ -28,6 +28,7 @@
     "react-resizable-panels": "^3.0.3",
     "recharts": "^3.1.2",
     "sonner": "^2.0.6",
+    "switch": "^0.0.0",
     "tailwind-merge": "^3.3.1",
     "tailwindcss": "^4.1.11",
     "vaul": "^1.1.2"
