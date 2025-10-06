@@ -12,6 +12,7 @@ import pickle
 import numpy as np
 import logging
 import joblib
+import gc  # Garbage collection for memory management
 
 # Setup logging - show user output but suppress noisy libraries
 logging.basicConfig(
@@ -623,6 +624,9 @@ def process_fits():
         
         mode_str = f"with Planet ID '{target}'" if has_target_id else "with manual stellar parameters"
         logger.info(f"✅ FITS processing complete {mode_str}: {classification} ({prob[0]:.2%} confidence)")
+        
+        # Force garbage collection to free memory
+        gc.collect()
         
         return jsonify(response)
         

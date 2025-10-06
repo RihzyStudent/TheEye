@@ -48,8 +48,12 @@ pip freeze > requirements.txt
    - **Branch**: `FrontEnd` or `main`
    - **Root Directory**: Leave blank
    - **Build Command**: `pip install -r TheEyeWebUI/server/requirements.txt`
-   - **Start Command**: `cd TheEyeWebUI/server && gunicorn main:app --bind 0.0.0.0:$PORT`
+   - **Start Command**: `cd TheEyeWebUI/server && gunicorn main:app -c gunicorn_config.py`
    - **Instance Type**: Free
+
+   **⚠️ Memory Warning**: Free tier has 512MB RAM. The app uses ~400-600MB with FITS processing. If you get OOM errors:
+   - Upgrade to Starter ($7/mo) for 2GB RAM
+   - Use Railway instead (better free tier memory management)
 5. Click **"Create Web Service"**
 6. Wait 5-10 minutes for deployment
 7. **Copy your backend URL** (e.g., `https://theeye-backend.onrender.com`)
