@@ -5,6 +5,7 @@ from sklearn.ensemble import RandomForestClassifier
 from sklearn.metrics import classification_report, confusion_matrix
 from imblearn.over_sampling import SMOTE
 from imblearn.over_sampling import ADASYN
+import joblib
 
 data = pd.read_csv('data.csv')
 
@@ -84,7 +85,6 @@ print(confusion_matrix(y_true, y_pred_best))
 print("\nClassification report:")
 print(classification_report(y_true, y_pred_best, target_names=['not-planet','planet']))
 
-import joblib
 
 model_package = {
     'model': best_rf,
