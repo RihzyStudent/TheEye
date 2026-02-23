@@ -1,5 +1,5 @@
 import { motion } from 'motion/react';
-import { useState, useRef } from 'react';
+import { useState, useRef, useEffect } from 'react';
 import { 
   Upload, 
   Send, 
@@ -29,12 +29,13 @@ import { Slider } from './ui/slider';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from './ui/select';
 import { Switch } from './ui/switch';
 import { Badge } from './ui/badge';
-
-// Flask Backend API Configuration
-const API_BASE_URL = 'http://localhost:5000';
-
-// Development mode - set to true to use mock data when Flask backend is not running
-const DEV_MODE = false; // change to true for development without backend
+import { usePyodide } from '../hooks/usePyodide';
+import { 
+  initializeMLModel, 
+  trainModelInBrowser, 
+  classifyExoplanetInBrowser,
+  type ExoplanetFeatures 
+} from '../utils/exoplanetML';
 
 interface ExoplanetDetectionScreenProps {
   onBack: () => void;
@@ -66,6 +67,10 @@ interface ExoplanetData {
 }
 
 export function ExoplanetDetectionScreen({ onBack }: ExoplanetDetectionScreenProps) {
+  // Pyodide hook
+  const { pyodide, loading: pyodideLoading, error: pyodideError, ready } = usePyodide();
+  const [mlInitialized, setMlInitialized] = useState(false);
+  
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [isProcessing, setIsProcessing] = useState(false);
   const [isTraining, setIsTraining] = useState(false);
@@ -95,7 +100,7 @@ export function ExoplanetDetectionScreen({ onBack }: ExoplanetDetectionScreenPro
     dec: ''
   });
 
-  // Model statistics (mock data - will be updated from your backend)
+  // Model statistics
   const [modelStats, setModelStats] = useState<ModelStats>({
     accuracy: 0.952,
     precision: 0.943,
@@ -104,68 +109,26 @@ export function ExoplanetDetectionScreen({ onBack }: ExoplanetDetectionScreenPro
     totalSamples: 15420,
     confirmedExoplanets: 3847,
     falsePositives: 234,
-    lastTrained: 'Not trained yet',
+    lastTrained: 'Not trained yet (Pyodide mode)',
     modelVersion: 'v1.0.0'
   });
 
-  // Mock training response for development
-  const mockTrainResponse = async () => {
-    return new Promise<any>((resolve) => {
-      setTimeout(() => {
-        resolve({
-          success: true,
-          stats: {
-            accuracy: 0.947 + Math.random() * 0.02,
-            precision: 0.940 + Math.random() * 0.02,
-            recall: 0.965 + Math.random() * 0.02,
-            f1Score: 0.952 + Math.random() * 0.02,
-            totalSamples: 15420,
-            confirmedExoplanets: 3847,
-            falsePositives: 234,
-            lastTrained: new Date().toLocaleString(),
-            modelVersion: 'v1.0.0'
-          }
+  // Initialize ML model when Pyodide is ready
+  useEffect(() => {
+    if (ready && pyodide && !mlInitialized) {
+      initializeMLModel(pyodide)
+        .then(() => {
+          setMlInitialized(true);
+          console.log('✅ ML model ready in browser');
+          toast.success('ML model loaded in browser!');
+        })
+        .catch((error) => {
+          console.error('Failed to initialize ML model:', error);
+          toast.error('Failed to initialize ML model');
         });
-      }, 2000);
-    });
-  };
+    }
+  }, [ready, pyodide, mlInitialized]);
 
-  // Mock classification response for development
-  const mockClassifyResponse = async () => {
-    return new Promise<any>((resolve) => {
-      setTimeout(() => {
-        const isExoplanet = Math.random() > 0.3;
-        resolve({
-          success: true,
-          classification: isExoplanet ? 'CONFIRMED EXOPLANET' : 'FALSE POSITIVE',
-          confidence: 0.85 + Math.random() * 0.15,
-          planetType: isExoplanet ? ['Hot Jupiter', 'Super-Earth', 'Neptune-like', 'Rocky Planet'][Math.floor(Math.random() * 4)] : null,
-          details: {
-            orbitalPeriod: `${manualData.orbitalPeriod || '3.52'} days`,
-            transitDuration: `${manualData.transitDuration || '2.8'} hours`,
-            planetaryRadius: `${manualData.planetaryRadius || '1.2'} Earth radii`,
-            estimatedMass: '1.07 Earth masses',
-            distanceFromStar: '0.169 AU',
-            equilibriumTemp: `${manualData.planetEquilibriumTemp || '1450'} K`,
-            stellarType: 'G-type main-sequence',
-            hostStarTemp: `${manualData.stellarEffectiveTemp || '5778'} K`
-          },
-          features: [
-            'Transit signature detected',
-            'Periodic dimming pattern confirmed',
-            'Doppler shift measured',
-            'Low false positive probability'
-          ],
-          similarExoplanets: [
-            'HD 209458 b',
-            '51 Pegasi b',
-            'WASP-12b'
-          ],
-          dataQuality: 'High'
-        });
-      }, 1500);
-    });
-  };
 
   const handleFileSelect = (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
@@ -189,6 +152,11 @@ export function ExoplanetDetectionScreen({ onBack }: ExoplanetDetectionScreenPro
   };
 
   const classifyData = async () => {
+    if (!pyodide || !mlInitialized) {
+      toast.error('ML model not ready yet. Please wait...');
+      return;
+    }
+
     setIsProcessing(true);
     setProgress(0);
     
@@ -197,66 +165,34 @@ export function ExoplanetDetectionScreen({ onBack }: ExoplanetDetectionScreenPro
         setProgress(prev => Math.min(prev + 10, 90));
       }, 200);
 
-      let data;
-
-      if (DEV_MODE) {
-        // Use mock data in development mode
-        data = await mockClassifyResponse();
-      } else {
-        // Use real Flask backend
-        let response;
-        
-        if (selectedFile) {
-          // File upload mode
-          const formData = new FormData();
-          formData.append('dataset', selectedFile);
-          formData.append('preprocessing', enablePreprocessing.toString());
-          formData.append('removeFalsePositives', removeFalsePositives.toString());
-          
-          response = await fetch(`${API_BASE_URL}/classify`, {
-            method: 'POST',
-            body: formData,
-          });
-        } else {
-          // Manual entry mode
-          response = await fetch(`${API_BASE_URL}/classify`, {
-            method: 'POST',
-            headers: {
-              'Content-Type': 'application/json',
-            },
-            body: JSON.stringify({
-              data: manualData,
-              preprocessing: enablePreprocessing,
-              removeFalsePositives: removeFalsePositives
-            })
-          });
-        }
-        
-        data = await response.json();
-      }
+      // Use Pyodide for classification
+      const features: ExoplanetFeatures = manualData;
+      const data = await classifyExoplanetInBrowser(pyodide, features);
+      
+      clearInterval(progressInterval);
       
       if (data.success) {
         setResult(data);
         setProgress(100);
-        clearInterval(progressInterval);
-        toast.success('Classification complete!');
+        toast.success('Classification complete! (Running in browser)');
       } else {
         throw new Error(data.error || 'Classification failed');
       }
       
     } catch (error) {
       console.error('Classification error:', error);
-      if (DEV_MODE) {
-        toast.error('Classification failed in development mode.');
-      } else {
-        toast.error('Classification failed. Is the Flask backend running on port 5000?');
-      }
+      toast.error(`Classification failed: ${error instanceof Error ? error.message : 'Unknown error'}`);
     } finally {
       setIsProcessing(false);
     }
   };
 
   const trainModel = async () => {
+    if (!pyodide || !mlInitialized) {
+      toast.error('ML model not ready yet. Please wait...');
+      return;
+    }
+
     setIsTraining(true);
     setProgress(0);
     
@@ -265,47 +201,28 @@ export function ExoplanetDetectionScreen({ onBack }: ExoplanetDetectionScreenPro
         setProgress(prev => Math.min(prev + 5, 95));
       }, 500);
 
-      let data;
-
-      if (DEV_MODE) {
-        // Use mock data in development mode
-        data = await mockTrainResponse();
-      } else {
-        // Use real Flask backend
-        const response = await fetch(`${API_BASE_URL}/train`, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({
-            dataset: selectedDataset,
-            learningRate: learningRate[0],
-            epochs: epochs[0],
-            batchSize: batchSize[0],
-            preprocessing: enablePreprocessing,
-            removeFalsePositives: removeFalsePositives
-          })
-        });
-        
-        data = await response.json();
-      }
+      // Use Pyodide for training
+      const data = await trainModelInBrowser(
+        pyodide,
+        selectedDataset,
+        learningRate[0],
+        epochs[0],
+        batchSize[0]
+      );
+      
+      clearInterval(progressInterval);
       
       if (data.success) {
         setModelStats(data.stats);
         setProgress(100);
-        clearInterval(progressInterval);
-        toast.success('Model training completed successfully!');
+        toast.success('Model training completed! (Running in browser)');
       } else {
         throw new Error(data.error || 'Training failed');
       }
       
     } catch (error) {
       console.error('Training error:', error);
-      if (DEV_MODE) {
-        toast.error('Training failed in development mode.');
-      } else {
-        toast.error('Training failed. Is the Flask backend running on port 5000?');
-      }
+      toast.error(`Training failed: ${error instanceof Error ? error.message : 'Unknown error'}`);
     } finally {
       setIsTraining(false);
       setTimeout(() => setProgress(0), 1000);
@@ -373,12 +290,22 @@ export function ExoplanetDetectionScreen({ onBack }: ExoplanetDetectionScreenPro
         </div>
         
         <div className="flex items-center gap-3">
-          {DEV_MODE && (
-            <Badge variant="outline" className="border-yellow-500 text-yellow-500 bg-yellow-500/10">
-              🧪 Dev Mode (Mock Data)
+          {pyodideLoading && (
+            <Badge variant="outline" className="border-blue-500 text-blue-500 bg-blue-500/10">
+              ⏳ Loading Python...
             </Badge>
           )}
-          <Button 
+          {mlInitialized && (
+            <Badge variant="outline" className="border-green-500 text-green-500 bg-green-500/10">
+              ✅ Browser ML Ready
+            </Badge>
+          )}
+          {pyodideError && (
+            <Badge variant="outline" className="border-red-500 text-red-500 bg-red-500/10">
+              ❌ Python Error
+            </Badge>
+          )}
+          <Button
             variant="ghost" 
             size="sm"
             onClick={handleReset}
@@ -399,6 +326,8 @@ export function ExoplanetDetectionScreen({ onBack }: ExoplanetDetectionScreenPro
             </CardTitle>
             <CardDescription className="text-gray-300">
               Current model: {modelStats.modelVersion} | Last trained: {modelStats.lastTrained}
+              <br />
+              <span className="text-stellar-gold">🌐 Running in browser with Pyodide + scikit-learn</span>
             </CardDescription>
           </CardHeader>
           <CardContent>
@@ -686,7 +615,7 @@ export function ExoplanetDetectionScreen({ onBack }: ExoplanetDetectionScreenPro
               <CardContent className="p-6">
                 <Button
                   onClick={classifyData}
-                  disabled={isProcessing || isTraining}
+                  disabled={isProcessing || isTraining || !mlInitialized}
                   className="w-full bg-stellar-gold text-cosmic-deep-blue hover:bg-yellow-400 transition-all disabled:opacity-50 h-14 text-lg"
                 >
                   {isProcessing ? (
@@ -797,7 +726,7 @@ export function ExoplanetDetectionScreen({ onBack }: ExoplanetDetectionScreenPro
               <CardContent className="p-6">
                 <Button
                   onClick={trainModel}
-                  disabled={isTraining || isProcessing}
+                  disabled={isTraining || isProcessing || !mlInitialized}
                   className="w-full bg-cosmic-purple text-pure-white hover:bg-cosmic-purple/80 h-12"
                 >
                   {isTraining ? (
@@ -835,6 +764,9 @@ export function ExoplanetDetectionScreen({ onBack }: ExoplanetDetectionScreenPro
               <CardContent className="text-gray-300 text-sm space-y-2">
                 <p>
                   This AI/ML tool helps classify exoplanet candidates from transit data.
+                </p>
+                <p>
+                  <strong className="text-stellar-gold">🌐 Browser-based ML:</strong> Uses Pyodide to run Python and scikit-learn directly in your browser. No server required!
                 </p>
                 <p>
                   Trained on NASA's Kepler, K2, and TESS mission datasets to identify confirmed exoplanets.
